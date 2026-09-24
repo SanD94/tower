@@ -139,11 +139,13 @@ The scope is very limited at the moment to see whether Tower will be working. To
 
 ```text
                                    clients
-          +-----------+----------+----------+--------------------+
-          |           |                     |                    |
-       Neovim       Amp skill            terminal       strategic-map UI
-          |           |                     |                    |
-          +-----------+----------+----------+--------------------+
+          +-----------+----------+------------------------------+
+          |           |                                         |
+       Neovim       Amp skill                  SwiftUI strategic-map client
+          |           |                          |              |
+          |           |                   libghostty-vt    Metal/MetalKit
+          |           |                    terminal/PTY       2D/3D UI
+          +-----------+----------+------------------------------+
                                  |
                        experimental CLI / JSON files
                                  |
@@ -169,7 +171,7 @@ The scope is very limited at the moment to see whether Tower will be working. To
 
 Use Python 3 for the first `tower` CLI because it minimizes implementation ceremony and makes representation rules and intermediate data easy to inspect and change. The PoC should be one package with straightforward modules, standard-library data structures, subprocess calls to existing tools, and tests. It should not introduce a plugin framework, daemon, async architecture, or distribution work before those are needed by an experiment.
 
-Python is a PoC choice, not a permanent product decision. Rust or another implementation language should be considered only if the PoC demonstrates value and measured constraints such as startup time, indexing throughput, memory use, deployment, or integration justify a rewrite.
+Python is a PoC choice, not the visual-client implementation language. If the textual experiments justify the strategic-map client, that client will be a native macOS application written in Swift, with SwiftUI for the application interface and Metal for the spatial viewport. The representation compiler remains a separate process with an inspectable protocol. Rewriting the compiler in Swift is a separate decision that requires measured constraints such as startup time, indexing throughput, memory use, deployment, or integration; choosing Swift for the client does not itself justify a rewrite.
 
 ### 7.2 Evidence storage: inspectable files first
 
@@ -191,7 +193,24 @@ The interfaces are introduced here in order for one to understand how one can co
 
 - **Milestones 1–3:** terminal output, JSON, and optional `fzf` selection/preview.
 - **Milestone 4:** a Lua Neovim plugin using asynchronous jobs and quickfix/location lists.
-- **Milestone 7:** only after the textual PoC shows value, a bounded visual prototype tests whether a strategic-map interaction adds value.
+- **Milestone 7:** only after the textual PoC shows value, a bounded native macOS prototype built with SwiftUI, MetalKit, Metal, and `libghostty-vt` tests whether a strategic-map interaction adds value.
+
+### 7.5 Strategic-map client stack
+
+The native strategic-map client will use:
+
+- **Swift** for application state, input routing, Scene IR handling, layout, and orchestration.
+- **SwiftUI** for the macOS application shell, commands, inspectors, controls, and accessibility integration.
+- **MetalKit and Metal** for the interactive 2D/3D viewport, cameras, geometry, text surfaces, picking, and GPU rendering.
+- **`libghostty-vt`** through its C ABI for terminal emulation, screen state, scrollback, selection, and keyboard/mouse encoding in an embedded terminal surface.
+
+These components have deliberately narrow ownership. SwiftUI owns application-level composition and native controls; it hosts an `MTKView` through an AppKit representable for rendering that needs direct frame and input control. Metal owns only the spatial and terminal drawing paths. `libghostty-vt` does not create a PTY, launch processes, draw glyphs, or own a window. The Swift client must own the child process and PTY, forward child output and terminal responses, translate GUI input through Ghostty's encoders, and render Ghostty's borrowed render-state cells with Metal. The representation compiler remains the source of semantic truth; the visual client consumes Representation IR and stores camera and presentation state separately as Scene IR.
+
+The client will use Apple's native frameworks directly rather than introducing a game engine or cross-platform rendering abstraction. SwiftUI views must not own per-frame rendering state: a dedicated renderer object coordinates the `MTKView`, command queue, render passes, resource lifetimes, and Scene IR snapshots. AppKit interoperation should remain limited to capabilities that SwiftUI does not expose precisely enough, such as the Metal view and low-level keyboard or pointer handling.
+
+`libghostty-vt` also has an evolving public API. Tower will pin a Ghostty revision, expose only its public C headers through a Clang module, initialize sized C structs correctly, use accessors instead of depending on packed cell layouts, and isolate raw imports behind a small typed Swift layer. Synchronous callbacks must remain non-blocking and non-reentrant; borrowed render data must not survive a render-state update.
+
+This initial client target is macOS on Metal. Portability of the compiler and textual clients remains unchanged. A non-Metal renderer or another desktop platform is future work and must not complicate the first spatial experiment.
 
 ## 8. Core domain model
 
@@ -472,6 +491,7 @@ Product-level performance targets should be set from observed PoC usage.
 - The PoC supports the development environment first and avoids unnecessary platform-specific APIs.
 - Python 3, Git, and `rg` are required external tools initially; `fzf`, Jujutsu, Neovim, and Amp integrations are optional capabilities.
 - Paths and command invocation must support spaces and non-ASCII characters.
+- The Milestone 7 native client initially targets macOS with Metal and is not a portability requirement for the representation compiler or textual clients.
 
 ### Testability
 
@@ -480,6 +500,7 @@ Product-level performance targets should be set from observed PoC usage.
 - Renderers test the same IR independently.
 - Integration tests use temporary Git and Jujutsu repositories.
 - Neovim tests run headlessly.
+- The native client keeps XCTest ABI smoke tests for its pinned `libghostty-vt` headers, PTY integration fixtures, and screenshot tests for representative Metal-rendered scenes, SwiftUI states, and terminal states.
 
 ## 11. Tool integration in practice
 
@@ -592,7 +613,7 @@ integrations/
   nvim/                  Lua plugin, added in Milestone 4
   amp-skill/             Amp skill, added in Milestone 5
 visualization/
-  prototype/             optional visual experiment, Milestone 7
+  prototype/             SwiftUI + Metal macOS experiment, Milestone 7
 experiments/
   formats/
   neovim/
@@ -614,4 +635,4 @@ The initial deliverable is a disposable proof of concept:
 
 This is not yet a product architecture. Neovim integration, an Amp skill, persistent storage, a service, packaging, and a strategic-map client are follow-up experiments. Each is added only when it answers a question that cannot be answered by the smaller CLI.
 
-If the representation thesis is supported, product discovery can choose an implementation language, storage model, protocol, and UI from measured needs. The eventual product may still feel more like a strategy game than a conventional developer application, but the PoC must earn that investment first.
+If the representation thesis is supported, the first visual product experiment uses the SwiftUI, MetalKit, Metal, and `libghostty-vt` stack described above and targets macOS only. Product discovery can still revise the storage model, protocol, and boundaries from measured needs. The eventual product may feel more like a strategy game than a conventional developer application, but the PoC must earn that investment first.

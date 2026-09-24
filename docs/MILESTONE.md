@@ -85,6 +85,8 @@ Implementation:
 - Record omissions and transformation history.
 - Add `tower map`, `tower refine`, `tower reframe`, `tower collapse`, and `tower explain`.
 - Build golden tests from small fixtures before applying rules to Neovim.
+- For one fixed Task B question and focus, produce candidate detail levels ranging from a signal or gist through a bounded 3–7-unit map, structured mechanism, and source evidence. Treat these levels as an experimental ladder, not as a fixed IR taxonomy or final UI control.
+- Vary detail, visible-unit budget, and viewpoint independently. Observe whether users retain the subject, can predict what refinement will reveal, reach sufficient evidence without overload, and return to a compressed representation without losing necessary conditions.
 - Run Task B with the baseline and textual PoC, then record a continue, revise, or stop decision using correctness, investigation effort, and evidence inspectability.
 
 Exit criteria:
@@ -93,6 +95,7 @@ Exit criteria:
 - Reframing that region as ownership preserves its subject and external ports.
 - Every rendered unit resolves to deterministic evidence.
 - Collapsing returns to a semantically equivalent boundary representation.
+- The experiment records whether useful control over detail is best represented by discrete levels, a continuous budget, contextual selection, or no separate control, without adding scope beyond the question and focus.
 - The comparison establishes whether representation operations add enough value to justify another milestone.
 
 ### Milestone 4: Neovim and interactive terminal workflow
@@ -169,8 +172,12 @@ Exit criteria:
 
 Implementation:
 
-- Define the smallest visual hypothesis and acceptance criteria before selecting technology.
-- Compare the easiest credible implementation options using a throwaway spike; do not assume a game engine, native client, or localhost service is required.
+- Define the smallest visual hypothesis and acceptance criteria before implementing the client.
+- Pin the Xcode and macOS deployment targets and a compatible Ghostty revision. Record licenses, required build tools, framework requirements, and supported macOS/CPU targets.
+- Build a minimal SwiftUI macOS application that hosts an `MTKView` through an AppKit representable, and verify that it selects a Metal device and presents a rendered frame before building Tower UI code.
+- Expose the public `libghostty-vt` C ABI through a Clang module, isolate it behind a typed Swift wrapper, and verify struct sizes, callbacks, ownership, and borrowed-data lifetimes against the pinned headers.
+- Implement the PTY/process boundary in Swift: child output feeds `libghostty-vt`, encoded keyboard/mouse/paste/focus input returns to the PTY, and synchronous terminal effects are queued or handled without re-entering the terminal.
+- Render a Ghostty render-state snapshot with Metal, including grapheme clusters, styles, cursor, selection, resize, and scrollback, rather than implementing a second terminal parser.
 - Build one bounded Task B visual prototype with a world viewport, map-mode controls, contextual inspector, and evidence panel.
 - Implement orbit, pan, tilt, perspective/orthographic switching, camera-altitude semantic zoom, stable selection, bookmarks, animated viewpoint transitions, and return-to-focus.
 - Implement responsibility territories and volumes, typed borders, elevated causal/event routes, ownership and contract layers, change terrain/heat, and confidence/provenance overlays.
@@ -183,6 +190,9 @@ Implementation:
 
 Exit criteria:
 
+- A reproducible clean build produces a native macOS SwiftUI application using Metal and the pinned `libghostty-vt` artifact.
+- A diagnostic reports the selected Metal device and active renderer; creating the viewport fails visibly if Metal is unavailable rather than silently selecting another renderer.
+- The embedded terminal can run the Tower CLI through a PTY, survive resize, display representative Unicode and styled output, and route keyboard input and terminal-generated replies correctly.
 - Task B can retain system context while its RPC edge expands into a causal mechanism and one queue unit reframes into ownership.
 - Switching among causal, ownership, contract, change, and provenance map modes preserves the selected subject and recognizable landmarks.
 - Changing camera altitude changes the represented information rather than merely scaling labels and geometry.
@@ -193,6 +203,13 @@ Exit criteria:
 - Representative default and transformed states pass visual inspection and accessibility checks.
 - Evaluation shows whether spatial interaction improves outcomes over the Neovim text representation.
 - A written decision states whether to discard the prototype, iterate on it, or begin product design; the prototype itself is not treated as the product foundation.
+
+Risk gates:
+
+- Pin the minimum macOS version before relying on SwiftUI or Metal APIs introduced after that version; availability checks must not become an accidental second UI implementation.
+- Keep SwiftUI state updates off the per-frame rendering path. If representable lifecycle or input bridging cannot satisfy the prototype's latency and control requirements, use a narrow AppKit host rather than adding a cross-platform engine.
+- `libghostty-vt` promises neither source nor ABI stability. Upgrading the pinned revision requires rerunning ABI and terminal integration tests before visual work continues.
+- Compile every Metal shader used by the prototype in clean and release builds, and test it on each supported Apple GPU family rather than inferring compatibility from the default scene.
 
 ### Milestone 8: generalization and runtime evidence
 
