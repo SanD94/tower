@@ -34,31 +34,6 @@ Early milestones may implement a deliberately narrow value for an input, but no 
 
 ## Backend PoCs
 
-### Milestone 0: walking CLI
-
-**Question:** What workspace and revision is Tower examining?
-
-**PoC:**
-
-```sh
-python -m tower status --root .
-python -m tower files --root .
-```
-
-Implementation:
-
-- Create the smallest Python package and standard-library CLI.
-- Detect the workspace root, Git revision, and dirty state without mutating the repository.
-- Enumerate searchable files through `rg --files` while honoring ignores.
-- Return text for people and versioned JSON for programs.
-- Add temporary-repository tests for workspace and revision identity.
-
-Exit criteria:
-
-- The commands run against Tower itself from the repository root and a nested directory.
-- The JSON identifies the exact evidence source from which later snapshots will be built.
-- Paths containing spaces and non-ASCII characters are covered by tests.
-
 ### Milestone 1: inspectable evidence
 
 **Question:** Where is Tower's compiler contract defined, and what exact source supports the answer?
