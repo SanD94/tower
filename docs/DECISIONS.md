@@ -25,3 +25,32 @@ python -m tower index --root . --output .tower/evidence.jsonl
 python -m tower search 'View = compile' --evidence .tower/evidence.jsonl
 python -m tower evidence <id> --evidence .tower/evidence.jsonl
 ```
+
+## First end-to-end representation compiler — continue
+
+The `compile` and `map` commands turn one evidence snapshot into bounded,
+provenance-backed Representation IR. Explicit terms determine relevance, focus
+anchors the subject, topology and evidence-list viewpoints produce different
+typed connections, evidence detail exposes source records, and the unit budget
+records every excluded candidate as an omission. Saved views render without
+recompilation, while `explain` reports why visible and omitted units received
+their decisions. Continue to cross-file and historical evidence without adding
+semantic relationships that `rg` and Git cannot support.
+
+Repeat the experiment with:
+
+```sh
+python -m tower index --root . --output .tower/evidence.jsonl
+python -m tower compile \
+  --evidence .tower/evidence.jsonl \
+  --question "Where are the compiler and client responsibilities described?" \
+  --intent locate-evidence \
+  --term compiler --term client \
+  --focus docs/DESCRIPTION.md \
+  --viewpoint topology \
+  --detail summary \
+  --budget-units 7 \
+  --output .tower/view.json
+python -m tower map --view .tower/view.json
+python -m tower explain <unit-id> --view .tower/view.json
+```

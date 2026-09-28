@@ -16,6 +16,16 @@ from tower.evidence import (
     search_snapshot,
     write_snapshot,
 )
+from tower.representation import (
+    SUPPORTED_DETAILS,
+    SUPPORTED_VIEWPOINTS,
+    RepresentationError,
+    compile_representation,
+    explain,
+    load_representation,
+    render_representation,
+    write_representation,
+)
 
 
 SCHEMA_VERSION = 1
@@ -127,6 +137,27 @@ def add_format_arguments(command: argparse.ArgumentParser, *, default: str) -> N
     )
 
 
+def add_compiler_arguments(
+    command: argparse.ArgumentParser, *, required: bool
+) -> None:
+    command.add_argument("--evidence", required=required, help="JSON Lines snapshot path")
+    command.add_argument("--question", required=required, help="information need")
+    command.add_argument("--intent", required=required, help="explicit question intent")
+    command.add_argument(
+        "--term",
+        action="append",
+        dest="terms",
+        required=required,
+        help="exact relevance term; repeat for multiple terms",
+    )
+    command.add_argument("--focus", required=required, help="evidence path or stable ID")
+    command.add_argument(
+        "--viewpoint", choices=SUPPORTED_VIEWPOINTS, required=required
+    )
+    command.add_argument("--detail", choices=SUPPORTED_DETAILS, required=required)
+    command.add_argument("--budget-units", type=int, required=required)
+
+
 def parser() -> argparse.ArgumentParser:
     cli = argparse.ArgumentParser(prog="tower")
     subparsers = cli.add_subparsers(dest="command", required=True)
@@ -162,6 +193,21 @@ def parser() -> argparse.ArgumentParser:
     evidence.add_argument("id", help="file or source-span evidence ID")
     evidence.add_argument("--evidence", required=True, help="JSON Lines snapshot path")
     add_format_arguments(evidence, default="compact")
+
+    compile_command = subparsers.add_parser("compile")
+    add_compiler_arguments(compile_command, required=True)
+    compile_command.add_argument("--output", required=True, help="Representation IR path")
+
+    map_command = subparsers.add_parser("map")
+    map_command.add_argument(
+        "--view", help="render saved Representation IR instead of compiling"
+    )
+    map_command.add_argument("--output", help="also save compiled Representation IR")
+    add_compiler_arguments(map_command, required=False)
+
+    explain_command = subparsers.add_parser("explain")
+    explain_command.add_argument("id", help="visible or omitted unit ID")
+    explain_command.add_argument("--view", required=True, help="Representation IR path")
     return cli
 
 
@@ -237,6 +283,54 @@ def main(argv: Sequence[str] | None = None) -> int:
                 print(f"Indexed {file_count} files and {span_count} spans: {output}")
             return 0
 
+        if arguments.command == "explain":
+            view = load_representation(evidence_path(arguments.view))
+            print(explain(view, arguments.id))
+            return 0
+
+        if arguments.command == "map" and arguments.view:
+            print(render_representation(load_representation(evidence_path(arguments.view))))
+            return 0
+
+        if arguments.command in ("compile", "map"):
+            missing = [
+                name
+                for name in (
+                    "evidence",
+                    "question",
+                    "intent",
+                    "terms",
+                    "focus",
+                    "viewpoint",
+                    "detail",
+                    "budget_units",
+                )
+                if getattr(arguments, name) is None
+            ]
+            if missing:
+                raise TowerError(
+                    "map requires --view or a complete compilation request; missing "
+                    + ", ".join("--" + name.replace("_", "-") for name in missing)
+                )
+            records = load_snapshot(evidence_path(arguments.evidence))
+            view = compile_representation(
+                records,
+                question=arguments.question,
+                intent=arguments.intent,
+                terms=arguments.terms,
+                focus=arguments.focus,
+                viewpoint=arguments.viewpoint,
+                detail=arguments.detail,
+                budget_units=arguments.budget_units,
+            )
+            if arguments.output:
+                write_representation(view, evidence_path(arguments.output))
+            if arguments.command == "compile":
+                print(str(evidence_path(arguments.output)))
+            else:
+                print(render_representation(view))
+            return 0
+
         snapshot = evidence_path(arguments.evidence)
         records = load_snapshot(snapshot)
         if arguments.command == "search":
@@ -264,7 +358,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         else:
             print(render_evidence(record))
         return 0
-    except (EvidenceError, TowerError, OSError) as error:
+    except (EvidenceError, RepresentationError, TowerError, OSError) as error:
         print(f"tower: {error}", file=sys.stderr)
         return 1
 

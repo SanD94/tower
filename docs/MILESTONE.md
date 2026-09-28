@@ -34,44 +34,6 @@ Early milestones may implement a deliberately narrow value for an input, but no 
 
 ## Backend PoCs
 
-### Milestone 2: first end-to-end representation compiler
-
-**Question:** Where are Tower's compiler and client responsibilities described, and how are those matches contained in the repository?
-
-**PoC:**
-
-```sh
-python -m tower map \
-  --evidence .tower/evidence.jsonl \
-  --question "Where are the compiler and client responsibilities described?" \
-  --intent locate-evidence \
-  --term compiler --term client \
-  --focus docs/DESCRIPTION.md \
-  --viewpoint topology \
-  --detail summary \
-  --budget-units 7
-```
-
-Implementation:
-
-- Use `rg` patterns to collect headings, exact terms, and surrounding text from Tower's documentation without parsing Markdown.
-- Introduce only repository, file, heading/match, `contains`, and `matched-by` evidence needed by the question.
-- Define Representation IR v1 and its JSON schema.
-- Implement `compile` and `map` with all six compiler inputs represented explicitly.
-- Resolve focus paths or IDs to stable evidence subjects.
-- Use question terms and intent for deterministic relevance; make unsupported interpretation visible rather than guessed.
-- Support topology and evidence-list viewpoints plus summary and evidence detail, so viewpoint and detail each have an observable effect.
-- Implement text renderers and `tower explain` for inclusion and omission decisions.
-
-Exit criteria:
-
-- Changing the question changes relevance without changing the underlying evidence.
-- Changing focus changes the anchored subject.
-- Changing viewpoint, detail, or budget causes a defined and testable output change.
-- Every visible unit and connection resolves to evidence.
-- Budget overflow produces explicit omissions.
-- The saved Representation IR can be rendered again without re-running compilation.
-
 ### Milestone 3: cross-file and historical evidence
 
 **Question:** Which Tower files and revisions define how search evidence is collected and inspected?

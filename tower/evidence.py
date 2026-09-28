@@ -65,6 +65,7 @@ def build_snapshot(root: Path, revision: str, output: Path) -> list[dict[str, ob
     records: list[dict[str, object]] = [
         {
             "type": "snapshot",
+            "id": evidence_id("snapshot", str(root), revision),
             "schema_version": SNAPSHOT_SCHEMA_VERSION,
             "workspace": {"root": str(root), "revision": revision, "vcs": "git"},
             "collector": {

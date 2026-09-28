@@ -1,0 +1,112 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tower.local/schemas/representation-ir-v1.json",
+  "title": "Tower Representation IR v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "schema_version",
+    "subject",
+    "frame",
+    "units",
+    "connections",
+    "omissions",
+    "diagnostics",
+    "transformations"
+  ],
+  "properties": {
+    "schema": { "const": "tower-representation-ir" },
+    "schema_version": { "const": 1 },
+    "subject": { "$ref": "#/$defs/id" },
+    "frame": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["evidence", "question", "focus", "viewpoint", "detail", "budget", "assumptions"],
+      "properties": {
+        "evidence": { "$ref": "#/$defs/id" },
+        "question": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["text", "intent", "terms"],
+          "properties": {
+            "text": { "type": "string" },
+            "intent": { "type": "string" },
+            "terms": { "type": "array", "minItems": 1, "items": { "type": "string" } }
+          }
+        },
+        "focus": { "$ref": "#/$defs/id" },
+        "viewpoint": { "enum": ["topology", "evidence-list"] },
+        "detail": { "enum": ["summary", "evidence"] },
+        "budget": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["max_visible_units"],
+          "properties": { "max_visible_units": { "type": "integer", "minimum": 1 } }
+        },
+        "assumptions": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "units": { "type": "array", "items": { "$ref": "#/$defs/unit" } },
+    "connections": { "type": "array", "items": { "$ref": "#/$defs/connection" } },
+    "omissions": { "type": "array", "items": { "$ref": "#/$defs/omission" } },
+    "diagnostics": { "type": "array", "items": { "$ref": "#/$defs/diagnostic" } },
+    "transformations": { "type": "array", "items": { "$ref": "#/$defs/transformation" } }
+  },
+  "$defs": {
+    "id": { "type": "string", "minLength": 1 },
+    "evidence": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/id" } },
+    "unit": {
+      "type": "object",
+      "required": ["id", "type", "label", "evidence"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "type": { "enum": ["repository", "file", "heading", "match", "span"] },
+        "label": { "type": "string" },
+        "evidence": { "$ref": "#/$defs/evidence" },
+        "source": { "type": "object" },
+        "provenance": { "type": "object" }
+      }
+    },
+    "connection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type", "source", "target", "evidence", "status"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "type": { "enum": ["contains", "matched-by"] },
+        "source": { "$ref": "#/$defs/id" },
+        "target": { "$ref": "#/$defs/id" },
+        "evidence": { "$ref": "#/$defs/evidence" },
+        "status": { "const": "observed" }
+      }
+    },
+    "omission": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["unit", "type", "evidence", "reason"],
+      "properties": {
+        "unit": { "$ref": "#/$defs/id" },
+        "type": { "type": "string" },
+        "evidence": { "$ref": "#/$defs/evidence" },
+        "reason": { "const": "max-visible-units" }
+      }
+    },
+    "diagnostic": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message"],
+      "properties": { "code": { "type": "string" }, "message": { "type": "string" } }
+    },
+    "transformation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "deterministic", "inputs"],
+      "properties": {
+        "name": { "const": "compile" },
+        "deterministic": { "const": true },
+        "inputs": { "type": "array", "items": { "type": "string" } }
+      }
+    }
+  }
+}

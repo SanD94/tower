@@ -229,6 +229,190 @@ class CliTest(unittest.TestCase):
         self.assertEqual("snapshot needle", stale_match["text"])
         self.assertTrue(stale_match["stale"])
 
+    def representation_fixture(self) -> Path:
+        self.repository.write(
+            "docs/design.md",
+            "# Tower\n"
+            "## Compiler\n"
+            "The compiler creates representations.\n"
+            "## Client\n"
+            "The client renders compiler output.\n",
+        )
+        self.repository.write("docs/other.md", "# Other\nclient boundary\n")
+        self.repository.commit()
+        snapshot = self.repository.root / "evidence.jsonl"
+        result, _, error = self.invoke(
+            "index", "--root", str(self.repository.root), "--output", str(snapshot)
+        )
+        self.assertEqual(0, result, error)
+        return snapshot
+
+    def compile_arguments(
+        self, snapshot: Path, *terms: str, budget: int = 20
+    ) -> tuple[str, ...]:
+        arguments = [
+            "--evidence",
+            str(snapshot),
+            "--question",
+            "Where are compiler and client responsibilities?",
+            "--intent",
+            "locate-evidence",
+        ]
+        for term in terms or ("compiler", "client"):
+            arguments.extend(("--term", term))
+        arguments.extend(
+            (
+                "--focus",
+                "docs/design.md",
+                "--viewpoint",
+                "topology",
+                "--detail",
+                "summary",
+                "--budget-units",
+                str(budget),
+            )
+        )
+        return tuple(arguments)
+
+    def test_compile_writes_bounded_provenance_backed_representation(self) -> None:
+        snapshot = self.representation_fixture()
+        view_path = self.repository.root / "view.json"
+
+        result, output, error = self.invoke(
+            "compile",
+            *self.compile_arguments(snapshot, budget=6),
+            "--output",
+            str(view_path),
+        )
+
+        self.assertEqual(0, result, error)
+        self.assertEqual(str(view_path), output.strip())
+        view = json.loads(view_path.read_text())
+        self.assertEqual("tower-representation-ir", view["schema"])
+        self.assertEqual(1, view["schema_version"])
+        self.assertEqual(6, len(view["units"]))
+        self.assertTrue(view["omissions"])
+        self.assertEqual(
+            {"compiler", "client"},
+            {
+                unit["provenance"]["matched_by"]
+                for unit in view["units"]
+                if unit["type"] == "match"
+            },
+        )
+        self.assertEqual(
+            {"evidence", "question", "focus", "viewpoint", "detail", "budget"},
+            set(view["transformations"][0]["inputs"]),
+        )
+        evidence_ids = {
+            json.loads(line).get("id") for line in snapshot.read_text().splitlines()
+        }
+        for item in view["units"] + view["connections"] + view["omissions"]:
+            self.assertTrue(set(item["evidence"]).issubset(evidence_ids))
+
+    def test_question_focus_viewpoint_detail_and_budget_are_operational(self) -> None:
+        snapshot = self.representation_fixture()
+
+        def compile_view(name: str, arguments: tuple[str, ...]) -> dict[str, object]:
+            output = self.repository.root / f"{name}.json"
+            result, _, error = self.invoke(
+                "compile", *arguments, "--output", str(output)
+            )
+            self.assertEqual(0, result, error)
+            return json.loads(output.read_text())
+
+        compiler = compile_view(
+            "compiler", self.compile_arguments(snapshot, "compiler")
+        )
+        client = compile_view("client", self.compile_arguments(snapshot, "client"))
+        self.assertNotEqual(
+            [unit["id"] for unit in compiler["units"]],
+            [unit["id"] for unit in client["units"]],
+        )
+
+        other_arguments = list(self.compile_arguments(snapshot, "client"))
+        other_arguments[other_arguments.index("docs/design.md")] = "docs/other.md"
+        other = compile_view("other", tuple(other_arguments))
+        self.assertNotEqual(compiler["subject"], other["subject"])
+
+        file_id = next(
+            json.loads(line)["id"]
+            for line in snapshot.read_text().splitlines()
+            if json.loads(line).get("path") == "docs/design.md"
+            and json.loads(line).get("type") == "file"
+        )
+        id_arguments = list(self.compile_arguments(snapshot, "compiler"))
+        id_arguments[id_arguments.index("docs/design.md")] = file_id
+        focused_by_id = compile_view("focused-by-id", tuple(id_arguments))
+        self.assertEqual(compiler["subject"], focused_by_id["subject"])
+
+        evidence_arguments = list(self.compile_arguments(snapshot, "compiler"))
+        evidence_arguments[evidence_arguments.index("topology")] = "evidence-list"
+        evidence_view = compile_view("evidence-list", tuple(evidence_arguments))
+        self.assertEqual(
+            {"matched-by"}, {edge["type"] for edge in evidence_view["connections"]}
+        )
+        self.assertNotIn("repository", {unit["type"] for unit in evidence_view["units"]})
+
+        detailed_arguments = list(self.compile_arguments(snapshot, "compiler"))
+        detailed_arguments[detailed_arguments.index("summary")] = "evidence"
+        detailed = compile_view("detailed", tuple(detailed_arguments))
+        self.assertTrue(all("source" in unit for unit in detailed["units"]))
+
+        bounded = compile_view(
+            "bounded", self.compile_arguments(snapshot, "compiler", budget=2)
+        )
+        self.assertEqual(2, len(bounded["units"]))
+        self.assertTrue(bounded["omissions"])
+
+    def test_saved_view_renders_and_explains_inclusion_and_omission(self) -> None:
+        snapshot = self.representation_fixture()
+        view_path = self.repository.root / "view.json"
+        result, _, error = self.invoke(
+            "compile",
+            *self.compile_arguments(snapshot, budget=3),
+            "--output",
+            str(view_path),
+        )
+        self.assertEqual(0, result, error)
+        view = json.loads(view_path.read_text())
+
+        result, output, error = self.invoke("map", "--view", str(view_path))
+        self.assertEqual(0, result, error)
+        self.assertIn("Viewpoint: topology", output)
+        self.assertIn("Omitted:", output)
+
+        included_id = view["units"][-1]["id"]
+        result, output, error = self.invoke(
+            "explain", included_id, "--view", str(view_path)
+        )
+        self.assertEqual(0, result, error)
+        self.assertIn("Decision: included", output)
+        self.assertIn("Evidence:", output)
+
+        omitted_id = view["omissions"][0]["unit"]
+        result, output, error = self.invoke(
+            "explain", omitted_id, "--view", str(view_path)
+        )
+        self.assertEqual(0, result, error)
+        self.assertIn("Decision: omitted", output)
+        self.assertIn("max-visible-units", output)
+
+    def test_unsupported_intent_produces_diagnostic_view(self) -> None:
+        snapshot = self.representation_fixture()
+        arguments = list(self.compile_arguments(snapshot, "compiler"))
+        arguments[arguments.index("locate-evidence")] = "infer-causality"
+        output = self.repository.root / "diagnostic.json"
+
+        result, _, error = self.invoke(
+            "compile", *arguments, "--output", str(output)
+        )
+
+        self.assertEqual(0, result, error)
+        view = json.loads(output.read_text())
+        self.assertEqual([], view["units"])
+        self.assertEqual("unsupported-intent", view["diagnostics"][0]["code"])
+
 
 if __name__ == "__main__":
     unittest.main()
