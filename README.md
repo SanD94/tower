@@ -8,16 +8,22 @@ relationships.
 
 Requirements: Python 3.11+, Git, and [ripgrep](https://github.com/BurntSushi/ripgrep).
 
+Install the `tower` CLI into `~/.local/bin` (re-run after moving the repository):
+
 ```sh
-python -m tower status
-python -m tower index --root . --output .tower/evidence.jsonl
-python -m tower search 'View = compile' --evidence .tower/evidence.jsonl
+./install.sh
+```
+
+```sh
+tower status
+tower index --root . --output .tower/evidence.jsonl
+tower search 'View = compile' --evidence .tower/evidence.jsonl
 ```
 
 Build and read a representation:
 
 ```sh
-python -m tower map \
+tower map \
   --evidence .tower/evidence.jsonl \
   --question "Where is the compiler contract defined?" \
   --intent locate-evidence \
@@ -29,7 +35,8 @@ python -m tower map \
   --output .tower/view.json
 ```
 
-Run `python -m tower <command> --help` for command options. Tower is a proof of
+Run `tower <command> --help` for command options; without installing, the same
+commands run as `python -m tower` from a checkout. Tower is a proof of
 concept; artifact formats may change. See [the description](docs/DESCRIPTION.md)
 for the model and [the milestones](docs/MILESTONE.md) for current scope.
 
