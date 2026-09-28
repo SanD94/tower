@@ -34,32 +34,6 @@ Early milestones may implement a deliberately narrow value for an input, but no 
 
 ## Backend PoCs
 
-### Milestone 4: local transformations
-
-**Question:** Can one part of a Tower evidence view be expanded and restored without losing the surrounding explanation?
-
-**PoC:**
-
-```sh
-python -m tower refine <unit-id> --view <view.json>
-python -m tower trace <unit-id> --view <view.json>
-python -m tower project <relationship-type> --view <view.json>
-python -m tower collapse <region-id> --view <refined-view.json>
-```
-
-Implementation:
-
-- Implement `refine`, `trace`, `project`, and `collapse` as named rewrites over Representation IR.
-- Preserve the original subject, external typed connections, and stable region ports.
-- Record claims added, retained, and omitted by each rewrite.
-- Make detail and budget apply locally as well as to initial compilation.
-
-Exit criteria:
-
-- Refining one region leaves its surroundings semantically unchanged.
-- Collapsing restores an equivalent boundary representation.
-- Transformation history explains every difference between saved views.
-
 ### Milestone 5: repeatable dogfooding evaluation
 
 **Question:** Does Tower help a person understand an unfamiliar Tower change more accurately or with less navigation than ordinary tools?

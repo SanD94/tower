@@ -20,10 +20,14 @@ from tower.representation import (
     SUPPORTED_DETAILS,
     SUPPORTED_VIEWPOINTS,
     RepresentationError,
+    collapse_representation,
     compile_representation,
     explain,
     load_representation,
+    project_representation,
+    refine_representation,
     render_representation,
+    trace_representation,
     write_representation,
 )
 
@@ -210,6 +214,28 @@ def parser() -> argparse.ArgumentParser:
     explain_command = subparsers.add_parser("explain")
     explain_command.add_argument("id", help="visible or omitted unit ID")
     explain_command.add_argument("--view", required=True, help="Representation IR path")
+
+    refine = subparsers.add_parser("refine")
+    refine.add_argument("id", help="visible boundary unit ID")
+    refine.add_argument("--view", required=True, help="Representation IR path")
+    refine.add_argument("--detail", choices=SUPPORTED_DETAILS, default="evidence")
+    refine.add_argument("--budget-units", type=int, default=5)
+    refine.add_argument("--output", required=True, help="transformed Representation IR path")
+
+    trace = subparsers.add_parser("trace")
+    trace.add_argument("id", help="visible unit ID")
+    trace.add_argument("--view", required=True, help="Representation IR path")
+    trace.add_argument("--output", required=True, help="transformed Representation IR path")
+
+    project = subparsers.add_parser("project")
+    project.add_argument("relationship_type", help="relationship type to retain")
+    project.add_argument("--view", required=True, help="Representation IR path")
+    project.add_argument("--output", required=True, help="transformed Representation IR path")
+
+    collapse = subparsers.add_parser("collapse")
+    collapse.add_argument("region_id", help="refined region ID")
+    collapse.add_argument("--view", required=True, help="Representation IR path")
+    collapse.add_argument("--output", required=True, help="transformed Representation IR path")
     return cli
 
 
@@ -297,6 +323,26 @@ def main(argv: Sequence[str] | None = None) -> int:
         if arguments.command == "explain":
             view = load_representation(evidence_path(arguments.view))
             print(explain(view, arguments.id))
+            return 0
+
+        if arguments.command in ("refine", "trace", "project", "collapse"):
+            view = load_representation(evidence_path(arguments.view))
+            if arguments.command == "refine":
+                transformed = refine_representation(
+                    view,
+                    arguments.id,
+                    detail=arguments.detail,
+                    budget_units=arguments.budget_units,
+                )
+            elif arguments.command == "trace":
+                transformed = trace_representation(view, arguments.id)
+            elif arguments.command == "project":
+                transformed = project_representation(view, arguments.relationship_type)
+            else:
+                transformed = collapse_representation(view, arguments.region_id)
+            output = evidence_path(arguments.output)
+            write_representation(transformed, output)
+            print(str(output))
             return 0
 
         if arguments.command == "map" and arguments.view:

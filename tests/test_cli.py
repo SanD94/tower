@@ -597,6 +597,205 @@ class CliTest(unittest.TestCase):
         self.assertEqual([], view["units"])
         self.assertEqual("unsupported-viewpoint", view["diagnostics"][0]["code"])
 
+    def test_refine_is_local_and_collapse_restores_the_boundary_view(self) -> None:
+        snapshot = self.representation_fixture()
+        original_path = self.repository.root / "bounded.json"
+        result, _, error = self.invoke(
+            "compile",
+            *self.compile_arguments(snapshot, budget=3),
+            "--output",
+            str(original_path),
+        )
+        self.assertEqual(0, result, error)
+        original = json.loads(original_path.read_text())
+        boundary = original["units"][0]["id"]
+        refined_path = self.repository.root / "refined.json"
+
+        result, output, error = self.invoke(
+            "refine",
+            boundary,
+            "--view",
+            str(original_path),
+            "--detail",
+            "evidence",
+            "--budget-units",
+            "3",
+            "--output",
+            str(refined_path),
+        )
+
+        self.assertEqual(0, result, error)
+        self.assertEqual(str(refined_path), output.strip())
+        refined = json.loads(refined_path.read_text())
+        self.assertEqual(original["units"], refined["units"][: len(original["units"])])
+        self.assertEqual(
+            original["connections"],
+            refined["connections"][: len(original["connections"])],
+        )
+        added_units = refined["units"][len(original["units"]) :]
+        self.assertEqual(2, len(added_units))
+        self.assertTrue(all("source" in item for item in added_units))
+        region = refined["regions"][0]
+        self.assertEqual(boundary, region["boundary"])
+        self.assertEqual("evidence", region["detail"])
+        self.assertEqual(3, region["budget"]["max_visible_units"])
+        self.assertEqual(
+            {
+                edge["id"]
+                for edge in original["connections"]
+                if boundary in (edge["source"], edge["target"])
+            },
+            {port["connection"] for port in region["ports"]},
+        )
+        refine_history = refined["transformations"][-1]
+        self.assertEqual("refine", refine_history["name"])
+        self.assertEqual(
+            {
+                item["id"]
+                for item in [
+                    *added_units,
+                    *refined["connections"][len(original["connections"]) :],
+                ]
+            },
+            set(refine_history["claims"]["added"]),
+        )
+        self.assertFalse(refine_history["claims"]["omitted"])
+
+        collapsed_path = self.repository.root / "collapsed.json"
+        result, _, error = self.invoke(
+            "collapse",
+            region["id"],
+            "--view",
+            str(refined_path),
+            "--output",
+            str(collapsed_path),
+        )
+
+        self.assertEqual(0, result, error)
+        collapsed = json.loads(collapsed_path.read_text())
+        for field in ("subject", "frame", "units", "connections", "omissions"):
+            self.assertEqual(original[field], collapsed[field])
+        self.assertEqual([], collapsed["regions"])
+        self.assertEqual("collapse", collapsed["transformations"][-1]["name"])
+        self.assertEqual(
+            set(refine_history["claims"]["added"]),
+            set(collapsed["transformations"][-1]["claims"]["omitted"]),
+        )
+
+    def test_refine_detail_and_budget_apply_only_to_promoted_units(self) -> None:
+        snapshot = self.representation_fixture()
+        original_path = self.repository.root / "bounded.json"
+        result, _, error = self.invoke(
+            "compile",
+            *self.compile_arguments(snapshot, budget=3),
+            "--output",
+            str(original_path),
+        )
+        self.assertEqual(0, result, error)
+        original = json.loads(original_path.read_text())
+        boundary = original["units"][0]["id"]
+
+        views = {}
+        for detail, budget in (("summary", 2), ("evidence", 3)):
+            output = self.repository.root / f"{detail}.json"
+            result, _, error = self.invoke(
+                "refine",
+                boundary,
+                "--view",
+                str(original_path),
+                "--detail",
+                detail,
+                "--budget-units",
+                str(budget),
+                "--output",
+                str(output),
+            )
+            self.assertEqual(0, result, error)
+            views[detail] = json.loads(output.read_text())
+
+        summary_added = views["summary"]["units"][len(original["units"]) :]
+        evidence_added = views["evidence"]["units"][len(original["units"]) :]
+        self.assertEqual(1, len(summary_added))
+        self.assertEqual(2, len(evidence_added))
+        self.assertNotIn("source", summary_added[0])
+        self.assertTrue(all("source" in item for item in evidence_added))
+
+    def test_trace_and_project_record_every_filtered_claim(self) -> None:
+        snapshot = self.historical_fixture()
+        original_path = self.repository.root / "change.json"
+        result, _, error = self.invoke(
+            "compile",
+            *self.historical_arguments(snapshot, "change"),
+            "--output",
+            str(original_path),
+        )
+        self.assertEqual(0, result, error)
+        original = json.loads(original_path.read_text())
+        projected_path = self.repository.root / "projected.json"
+
+        result, _, error = self.invoke(
+            "project",
+            "line-attributed-to",
+            "--view",
+            str(original_path),
+            "--output",
+            str(projected_path),
+        )
+
+        self.assertEqual(0, result, error)
+        projected = json.loads(projected_path.read_text())
+        self.assertEqual(
+            {"line-attributed-to"},
+            {edge["type"] for edge in projected["connections"]},
+        )
+        project_history = projected["transformations"][-1]
+        self.assertEqual("project", project_history["name"])
+        self.assertEqual(
+            len(original["units"]) + len(original["connections"]),
+            sum(len(items) for items in project_history["claims"].values()),
+        )
+        self.assertTrue(project_history["claims"]["omitted"])
+
+        disconnected = dict(original["units"][0])
+        disconnected["id"] = "unit-disconnected"
+        disconnected["evidence"] = ["evidence-disconnected"]
+        original["units"].append(disconnected)
+        original_path.write_text(json.dumps(original), encoding="utf-8")
+        trace_from = next(
+            unit["id"] for unit in original["units"] if unit["type"] == "match"
+        )
+        traced_path = self.repository.root / "traced.json"
+        result, _, error = self.invoke(
+            "trace",
+            trace_from,
+            "--view",
+            str(original_path),
+            "--output",
+            str(traced_path),
+        )
+        self.assertEqual(0, result, error)
+        traced = json.loads(traced_path.read_text())
+        self.assertNotIn("unit-disconnected", {unit["id"] for unit in traced["units"]})
+        self.assertIn(
+            "unit-disconnected", traced["transformations"][-1]["claims"]["omitted"]
+        )
+
+        golden_projection = {
+            "refine_operations": ["refine", "collapse"],
+            "projected_connection_types": sorted(
+                {edge["type"] for edge in projected["connections"]}
+            ),
+            "project_records_omissions": bool(project_history["claims"]["omitted"]),
+            "trace_records_disconnected_unit": "unit-disconnected"
+            in traced["transformations"][-1]["claims"]["omitted"],
+        }
+        golden_path = (
+            Path(__file__).parent
+            / "golden"
+            / "milestone-4-local-transformations.json"
+        )
+        self.assertEqual(json.loads(golden_path.read_text()), golden_projection)
+
 
 if __name__ == "__main__":
     unittest.main()

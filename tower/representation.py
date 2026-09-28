@@ -5,6 +5,8 @@ import json
 import os
 import re
 import tempfile
+from collections import deque
+from copy import deepcopy
 from pathlib import Path
 from typing import Sequence
 
@@ -200,6 +202,7 @@ def compile_representation(
         "frame": frame,
         "units": [],
         "connections": [],
+        "regions": [],
         "omissions": [],
         "diagnostics": [],
         "transformations": [
@@ -500,16 +503,338 @@ def compile_representation(
         else:
             visible_connections[identifier] = item
     result["connections"] = list(visible_connections.values())
-    result["omissions"] = [
-        {
-            "unit": candidate["id"],
-            "type": candidate["type"],
-            "evidence": candidate["evidence"],
-            "reason": "max-visible-units",
-        }
-        for candidate in candidates[budget_units:]
-    ]
+    omitted_ids = {candidate["id"] for candidate in candidates[budget_units:]}
+    for candidate in candidates[budget_units:]:
+        hidden_unit = deepcopy(candidate)
+        if detail == "summary":
+            record = record_by_id(records, str(candidate["evidence"][0]))
+            if record is not None:
+                detailed = unit(
+                    str(candidate["type"]),
+                    record,
+                    "evidence",
+                    label=str(candidate["label"]),
+                    provenance=candidate.get("provenance"),
+                )
+                hidden_unit = detailed
+        result["omissions"].append(
+            {
+                "unit": candidate["id"],
+                "type": candidate["type"],
+                "evidence": candidate["evidence"],
+                "reason": "max-visible-units",
+                "hidden_unit": hidden_unit,
+                "connections": [
+                    deepcopy(item)
+                    for item in candidate_connections
+                    if candidate["id"] in (item["source"], item["target"])
+                    and (
+                        item["source"] in visible_ids | omitted_ids
+                        and item["target"] in visible_ids | omitted_ids
+                    )
+                ],
+            }
+        )
     return result
+
+
+def visible_claim_ids(view: dict[str, object]) -> list[str]:
+    return [
+        str(item["id"])
+        for item in [*view["units"], *view["connections"]]
+    ]
+
+
+def transformation_record(
+    name: str,
+    *,
+    before: Sequence[str],
+    after: Sequence[str],
+    inputs: dict[str, object],
+) -> dict[str, object]:
+    before_set = set(before)
+    after_set = set(after)
+    return {
+        "name": name,
+        "deterministic": True,
+        "inputs": inputs,
+        "claims": {
+            "added": sorted(after_set - before_set),
+            "retained": sorted(before_set & after_set),
+            "omitted": sorted(before_set - after_set),
+        },
+    }
+
+
+def find_unit(view: dict[str, object], identifier: str) -> dict[str, object]:
+    found = next(
+        (item for item in view["units"] if item.get("id") == identifier), None
+    )
+    if found is None:
+        raise RepresentationError(f"visible unit not found in representation: {identifier}")
+    return found
+
+
+def refine_representation(
+    view: dict[str, object],
+    identifier: str,
+    *,
+    detail: str,
+    budget_units: int,
+) -> dict[str, object]:
+    if detail not in SUPPORTED_DETAILS:
+        raise RepresentationError(f"unsupported detail: {detail}")
+    if budget_units < 1:
+        raise RepresentationError("budget-units must be at least 1")
+    if view.get("regions"):
+        raise RepresentationError(
+            "representation already has a refined region; collapse it before refining again"
+        )
+    find_unit(view, identifier)
+    before = visible_claim_ids(view)
+    result = deepcopy(view)
+    visible_ids = {str(item["id"]) for item in result["units"]}
+    omissions = {
+        str(item["unit"]): item
+        for item in result["omissions"]
+        if isinstance(item.get("hidden_unit"), dict)
+    }
+    graph: dict[str, list[tuple[str, dict[str, object]]]] = {}
+    for omission in omissions.values():
+        for edge in omission.get("connections", []):
+            source = str(edge["source"])
+            target = str(edge["target"])
+            graph.setdefault(source, []).append((target, edge))
+            graph.setdefault(target, []).append((source, edge))
+
+    promoted: list[str] = []
+    queue: deque[str] = deque([identifier])
+    visited = {identifier}
+    while queue and len(promoted) < budget_units - 1:
+        current = queue.popleft()
+        for neighbor, _ in graph.get(current, []):
+            if neighbor in visited:
+                continue
+            visited.add(neighbor)
+            if neighbor in omissions:
+                promoted.append(neighbor)
+                queue.append(neighbor)
+                if len(promoted) == budget_units - 1:
+                    break
+
+    promoted_set = set(promoted)
+    added_connections: dict[str, dict[str, object]] = {}
+    for promoted_id in promoted:
+        hidden = deepcopy(omissions[promoted_id]["hidden_unit"])
+        if detail == "summary":
+            hidden.pop("source", None)
+        result["units"].append(hidden)
+        visible_ids.add(promoted_id)
+    for omission in omissions.values():
+        for edge in omission.get("connections", []):
+            if edge["source"] in visible_ids and edge["target"] in visible_ids:
+                added_connections[str(edge["id"])] = deepcopy(edge)
+    existing_connections = {str(item["id"]) for item in result["connections"]}
+    result["connections"].extend(
+        edge
+        for edge_id, edge in added_connections.items()
+        if edge_id not in existing_connections
+    )
+
+    previous_omissions = deepcopy(result["omissions"])
+    result["omissions"] = [
+        item for item in result["omissions"] if str(item["unit"]) not in promoted_set
+    ]
+    ports = [
+        {
+            "connection": str(edge["id"]),
+            "type": str(edge["type"]),
+            "direction": "out" if edge["source"] == identifier else "in",
+            "outside": str(edge["target"] if edge["source"] == identifier else edge["source"]),
+        }
+        for edge in view["connections"]
+        if identifier in (edge["source"], edge["target"])
+    ]
+    region_id = stable_id(
+        "region", identifier, detail, budget_units, len(result["transformations"])
+    )
+    result.setdefault("regions", []).append(
+        {
+            "id": region_id,
+            "boundary": identifier,
+            "members": [identifier, *promoted],
+            "ports": ports,
+            "detail": detail,
+            "budget": {"max_visible_units": budget_units},
+            "inverse": {
+                "remove_units": promoted,
+                "remove_connections": sorted(
+                    set(added_connections) - existing_connections
+                ),
+                "restore_omissions": previous_omissions,
+            },
+        }
+    )
+    after = visible_claim_ids(result)
+    result["transformations"].append(
+        transformation_record(
+            "refine",
+            before=before,
+            after=after,
+            inputs={
+                "unit": identifier,
+                "detail": detail,
+                "budget": {"max_visible_units": budget_units},
+                "region": region_id,
+            },
+        )
+    )
+    return result
+
+
+def collapse_representation(
+    view: dict[str, object], region_id: str
+) -> dict[str, object]:
+    region = next(
+        (item for item in view.get("regions", []) if item.get("id") == region_id), None
+    )
+    if region is None:
+        raise RepresentationError(f"region not found in representation: {region_id}")
+    before = visible_claim_ids(view)
+    result = deepcopy(view)
+    inverse = region["inverse"]
+    remove_units = set(inverse["remove_units"])
+    remove_connections = set(inverse["remove_connections"])
+    result["units"] = [
+        item for item in result["units"] if item["id"] not in remove_units
+    ]
+    result["connections"] = [
+        item
+        for item in result["connections"]
+        if item["id"] not in remove_connections
+    ]
+    result["omissions"] = deepcopy(inverse["restore_omissions"])
+    result["regions"] = [
+        item for item in result["regions"] if item["id"] != region_id
+    ]
+    after = visible_claim_ids(result)
+    result["transformations"].append(
+        transformation_record(
+            "collapse",
+            before=before,
+            after=after,
+            inputs={"region": region_id},
+        )
+    )
+    return result
+
+
+def filtered_representation(
+    view: dict[str, object],
+    *,
+    name: str,
+    inputs: dict[str, object],
+    retained_connections: Sequence[dict[str, object]],
+    required_unit_ids: set[str],
+) -> dict[str, object]:
+    before = visible_claim_ids(view)
+    result = deepcopy(view)
+    retained_ids = {str(item["id"]) for item in retained_connections}
+    removed_units = [
+        item for item in result["units"] if str(item["id"]) not in required_unit_ids
+    ]
+    removed_connections = [
+        item for item in result["connections"] if str(item["id"]) not in retained_ids
+    ]
+    result["units"] = [
+        item for item in result["units"] if str(item["id"]) in required_unit_ids
+    ]
+    result["connections"] = list(deepcopy(retained_connections))
+    for item in removed_units:
+        result["omissions"].append(
+            {
+                "unit": item["id"],
+                "type": item["type"],
+                "evidence": item["evidence"],
+                "reason": name,
+                "hidden_unit": deepcopy(item),
+                "connections": [
+                    deepcopy(edge)
+                    for edge in removed_connections
+                    if item["id"] in (edge["source"], edge["target"])
+                ],
+            }
+        )
+    result["regions"] = []
+    after = visible_claim_ids(result)
+    result["transformations"].append(
+        transformation_record(name, before=before, after=after, inputs=inputs)
+    )
+    return result
+
+
+def trace_representation(
+    view: dict[str, object], identifier: str
+) -> dict[str, object]:
+    find_unit(view, identifier)
+    connected = {identifier}
+    queue = deque([identifier])
+    while queue:
+        current = queue.popleft()
+        for edge in view["connections"]:
+            if current not in (edge["source"], edge["target"]):
+                continue
+            neighbor = str(
+                edge["target"] if edge["source"] == current else edge["source"]
+            )
+            if neighbor not in connected:
+                connected.add(neighbor)
+                queue.append(neighbor)
+    subject_units = {
+        str(item["id"])
+        for item in view["units"]
+        if view["subject"] in item["evidence"]
+    }
+    connected.update(subject_units)
+    edges = [
+        item
+        for item in view["connections"]
+        if item["source"] in connected and item["target"] in connected
+    ]
+    return filtered_representation(
+        view,
+        name="trace",
+        inputs={"unit": identifier},
+        retained_connections=edges,
+        required_unit_ids=connected,
+    )
+
+
+def project_representation(
+    view: dict[str, object], relationship: str
+) -> dict[str, object]:
+    edges = [item for item in view["connections"] if item["type"] == relationship]
+    if not edges:
+        raise RepresentationError(
+            f"relationship type not found in representation: {relationship}"
+        )
+    required = {
+        str(endpoint)
+        for edge in edges
+        for endpoint in (edge["source"], edge["target"])
+    }
+    required.update(
+        str(item["id"])
+        for item in view["units"]
+        if view["subject"] in item["evidence"]
+    )
+    return filtered_representation(
+        view,
+        name="project",
+        inputs={"relationship_type": relationship},
+        retained_connections=edges,
+        required_unit_ids=required,
+    )
 
 
 def write_representation(view: dict[str, object], output: Path) -> None:
@@ -557,7 +882,10 @@ def render_representation(view: dict[str, object]) -> str:
             f"  {item['source']} --{item['type']}--> {item['target']}{status}"
         )
     if view["omissions"]:
-        lines.append(f"Omitted: {len(view['omissions'])} relevant units (max-visible-units)")
+        reasons = ", ".join(
+            sorted({str(item["reason"]) for item in view["omissions"]})
+        )
+        lines.append(f"Omitted: {len(view['omissions'])} relevant units ({reasons})")
     for diagnostic in view["diagnostics"]:
         lines.append(f"Diagnostic: {diagnostic['message']}")
     return "\n".join(lines)

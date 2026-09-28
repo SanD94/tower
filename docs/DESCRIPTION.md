@@ -211,7 +211,7 @@ Don't design a database schema during the PoC. Move to SQLite or another store o
 
 Interfaces arrive only after the backend behavior they consume is executable:
 
-- **Milestones 4–5:** CLI, terminal output, JSON/JSON Lines, and optional `fzf` selection/preview.
+- **Milestone 5:** CLI, terminal output, JSON/JSON Lines, and optional `fzf` selection/preview.
 - **Milestone 6:** an Amp skill tests bounded agent consumption of the same CLI contract.
 - **Milestone 7:** a SwiftUI client tests persistent inspection of saved Representation IR.
 - **Milestone 8:** only after a specific spatial question is identified, a Metal viewport tests strategic-map interaction.

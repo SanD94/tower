@@ -11,6 +11,7 @@
     "frame",
     "units",
     "connections",
+    "regions",
     "omissions",
     "diagnostics",
     "transformations"
@@ -49,6 +50,7 @@
     },
     "units": { "type": "array", "items": { "$ref": "#/$defs/unit" } },
     "connections": { "type": "array", "items": { "$ref": "#/$defs/connection" } },
+    "regions": { "type": "array", "items": { "$ref": "#/$defs/region" } },
     "omissions": { "type": "array", "items": { "$ref": "#/$defs/omission" } },
     "diagnostics": { "type": "array", "items": { "$ref": "#/$defs/diagnostic" } },
     "transformations": { "type": "array", "items": { "$ref": "#/$defs/transformation" } }
@@ -89,7 +91,48 @@
         "unit": { "$ref": "#/$defs/id" },
         "type": { "type": "string" },
         "evidence": { "$ref": "#/$defs/evidence" },
-        "reason": { "const": "max-visible-units" }
+        "reason": { "enum": ["max-visible-units", "trace", "project"] },
+        "hidden_unit": { "$ref": "#/$defs/unit" },
+        "connections": { "type": "array", "items": { "$ref": "#/$defs/connection" } }
+      }
+    },
+    "region": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "boundary", "members", "ports", "detail", "budget", "inverse"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "boundary": { "$ref": "#/$defs/id" },
+        "members": { "type": "array", "items": { "$ref": "#/$defs/id" } },
+        "ports": { "type": "array", "items": { "$ref": "#/$defs/port" } },
+        "detail": { "enum": ["summary", "evidence"] },
+        "budget": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["max_visible_units"],
+          "properties": { "max_visible_units": { "type": "integer", "minimum": 1 } }
+        },
+        "inverse": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["remove_units", "remove_connections", "restore_omissions"],
+          "properties": {
+            "remove_units": { "type": "array", "items": { "$ref": "#/$defs/id" } },
+            "remove_connections": { "type": "array", "items": { "$ref": "#/$defs/id" } },
+            "restore_omissions": { "type": "array", "items": { "$ref": "#/$defs/omission" } }
+          }
+        }
+      }
+    },
+    "port": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["connection", "type", "direction", "outside"],
+      "properties": {
+        "connection": { "$ref": "#/$defs/id" },
+        "type": { "type": "string" },
+        "direction": { "enum": ["in", "out"] },
+        "outside": { "$ref": "#/$defs/id" }
       }
     },
     "diagnostic": {
@@ -103,9 +146,24 @@
       "additionalProperties": false,
       "required": ["name", "deterministic", "inputs"],
       "properties": {
-        "name": { "const": "compile" },
+        "name": { "enum": ["compile", "refine", "trace", "project", "collapse"] },
         "deterministic": { "const": true },
-        "inputs": { "type": "array", "items": { "type": "string" } }
+        "inputs": {
+          "oneOf": [
+            { "type": "array", "items": { "type": "string" } },
+            { "type": "object" }
+          ]
+        },
+        "claims": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["added", "retained", "omitted"],
+          "properties": {
+            "added": { "type": "array", "items": { "$ref": "#/$defs/id" } },
+            "retained": { "type": "array", "items": { "$ref": "#/$defs/id" } },
+            "omitted": { "type": "array", "items": { "$ref": "#/$defs/id" } }
+          }
+        }
       }
     }
   }

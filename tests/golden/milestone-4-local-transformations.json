@@ -1,0 +1,11 @@
+{
+  "project_records_omissions": true,
+  "projected_connection_types": [
+    "line-attributed-to"
+  ],
+  "refine_operations": [
+    "refine",
+    "collapse"
+  ],
+  "trace_records_disconnected_unit": true
+}

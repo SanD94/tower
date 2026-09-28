@@ -85,3 +85,39 @@ python -m tower compile \
 python -m tower map --view .tower/change-view.json
 python -m tower evidence <commit-id> --evidence .tower/evidence.jsonl
 ```
+
+## Local transformations — continue
+
+The `refine`, `trace`, `project`, and `collapse` commands now rewrite saved
+Representation IR without recompiling evidence. Refinement promotes only the
+omitted units reachable from the selected boundary and applies its own detail and
+visible-unit budget. Existing units, typed connections, subject, and boundary
+ports remain unchanged. Collapse restores the original boundary view exactly,
+apart from the appended history that records the inverse rewrite. Trace and
+project record every filtered unit and connection as an omitted claim. Continue
+to repeatable dogfooding evaluation; the local rewrite contract is useful without
+introducing syntax-aware evidence or another representation store.
+
+Repeat the experiment with:
+
+```sh
+python -m tower compile \
+  --evidence .tower/evidence.jsonl \
+  --question "Where are local representation transformations defined?" \
+  --intent locate-evidence \
+  --term refine --term collapse \
+  --focus tower/representation.py \
+  --viewpoint topology \
+  --detail summary \
+  --budget-units 4 \
+  --output .tower/local-view.json
+python -m tower refine <unit-id> \
+  --view .tower/local-view.json --detail evidence --budget-units 5 \
+  --output .tower/refined-view.json
+python -m tower trace <unit-id> \
+  --view .tower/refined-view.json --output .tower/traced-view.json
+python -m tower project contains \
+  --view .tower/refined-view.json --output .tower/projected-view.json
+python -m tower collapse <region-id> \
+  --view .tower/refined-view.json --output .tower/collapsed-view.json
+```
