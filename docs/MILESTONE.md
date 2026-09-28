@@ -1,231 +1,271 @@
-## Milestones
+# Milestones
 
-Each milestone must end with executable behavior, tests, and a short decision record. While the PoC formats are experimental, later milestones may replace them rather than maintain migrations; they must not require speculative infrastructure in advance.
+Tower is developed as a sequence of executable proofs of concept. The Tower repository is the initial corpus: after each slice exists, it is used to investigate the next slice. This dogfooding loop keeps the backend useful before a graphical client exists and exposes representation problems while the system is still small enough to change freely.
 
-These milestones describe experiments, not a product roadmap. Until Milestone 3 is evaluated, prefer disposable code, inspectable artifacts, and the smallest implementation that can falsify the thesis. Product hardening begins only after a written continue/revise/stop decision.
+Every milestone must end with:
 
-### Milestone 0: experimental foundation
+- A question about Tower that can be investigated with the resulting executable.
+- A repeatable command sequence and inspectable artifacts.
+- Tests for the behavior introduced by the milestone.
+- A short continue, revise, or stop decision.
 
-**Goal:** Make the research question falsifiable and reproducible.
+The milestones are experiments, not a product roadmap. Formats may be replaced while the PoC remains experimental. The backend deliberately uses only `rg`, Git, and optional `fzf`; do not add a parser, language server, database, daemon, plugin framework, or client capability before an experiment proves that the minimal tools are insufficient.
 
-Implementation:
+## Compiler contract
 
-- Initialize the repository and development tooling.
-- Pin a Neovim revision and document how to prepare it (located in ~/projects/github.com/sand94/neovim/)
-- Write ground-truth packages and scoring rubrics for Tasks A–C.
-- Capture baseline investigations using Neovim, `rg`, `fzf`, and Git/Jujutsu.
-- Define evaluation event and answer formats.
-- Record baseline time, navigation count, files opened, and answer correctness.
+The milestones converge on one contract:
 
-Deliverables:
+```text
+View = compile(Evidence, Question, Focus, Viewpoint, Detail, Budget)
+```
 
-- `experiments/neovim/corpus.toml`
-- `experiments/neovim/tasks/*.md`
-- `experiments/schema/session.schema.json`
-- Baseline session runner and redacted sample session
+Each input must have an observable effect:
 
-Exit criteria:
+- **Evidence** supplies the versioned facts and provenance that compilation is allowed to use.
+- **Question** states the information need and influences relevance. In the deterministic PoC it includes plain text, an explicit intent, and explicit search terms rather than pretending that unrestricted natural-language understanding already exists.
+- **Focus** anchors compilation to stable subjects in the evidence graph.
+- **Viewpoint** selects which relationship meanings and representation forms are useful for the question.
+- **Detail** controls explanatory granularity: summary, mechanism, or evidence—not graphical magnification.
+- **Budget** is a structured set of hard limits. The first PoC supports maximum visible units; excluded relevant material must be recorded as omissions rather than silently discarded.
 
-- Another person can reproduce the pinned corpus and run all three tasks.
-- Each task has an independently reviewable answer rubric.
-- The baseline toolchain is usable before Tower indexing exists.
+The resulting **View** is Representation IR, not a screen layout. It contains the complete frame, visible units, typed connections, provenance, omissions, and transformation history. Terminal and graphical renderers consume the same IR.
 
-### Milestone 1: local evidence spine
+Early milestones may implement a deliberately narrow value for an input, but no input may remain decorative metadata. A milestone that cannot demonstrate how its supported inputs affect output has not implemented this contract.
 
-**Goal:** Establish stable repository identities and inspectable search evidence.
+## Backend PoCs
 
-Implementation:
+### Milestone 0: walking CLI
 
-- Create a small Python package and `tower` CLI.
-- Detect workspace root, Git/Jujutsu mode, revision, and dirty state.
-- Write versioned JSON/JSON Lines evidence snapshots atomically.
-- Ingest files through `rg --files` and content hashes.
-- Wrap `rg --json`, normalize source spans, and stream JSON Lines.
-- Implement `tower status`, `tower index`, `tower search`, and `tower evidence`.
-- Add source preview and `fzf`-oriented output.
+**Question:** What workspace and revision is Tower examining?
 
-Exit criteria:
+**PoC:**
 
-- Search results resolve to stable IDs and exact source spans.
-- Editing one file invalidates only that file's indexed evidence.
-- Git and Jujutsu fixture tests produce equivalent normalized workspace state.
-- Baseline users can use Tower as a precise search/evidence wrapper without any AI.
-
-### Milestone 2: typed evidence graph
-
-**Goal:** Represent enough deterministic evidence for Task A.
+```sh
+python -m tower status --root .
+python -m tower files --root .
+```
 
 Implementation:
 
-- Add only the small C and Lua extractors needed by Task A; use Tree-sitter only where simpler extraction is unreliable.
-- Index the symbols, declarations, syntax references, and selected call relationships required by the experiment.
-- Parse relevant CMake target and generator relationships.
-- Model generated-from lineage.
-- Add Git/Jujutsu history and changed-with evidence.
-- Implement entity, relationship, and claim inspection commands.
-- Add deterministic test-to-API associations for Task A.
+- Create the smallest Python package and standard-library CLI.
+- Detect the workspace root, Git revision, and dirty state without mutating the repository.
+- Enumerate searchable files through `rg --files` while honoring ignores.
+- Return text for people and versioned JSON for programs.
+- Add temporary-repository tests for workspace and revision identity.
 
 Exit criteria:
 
-- Task A's required evidence can be retrieved without a repository-wide AI prompt.
-- Generated API artifacts trace back to their authoring declarations and generators.
-- Every relationship identifies its extractor and evidence spans.
-- Unsupported relationships remain absent rather than guessed.
+- The commands run against Tower itself from the repository root and a nested directory.
+- The JSON identifies the exact evidence source from which later snapshots will be built.
+- Paths containing spaces and non-ASCII characters are covered by tests.
 
-### Milestone 3: representation kernel
+### Milestone 1: inspectable evidence
 
-**Goal:** Test local representation shifts in the simplest useful textual form.
+**Question:** Where is Tower's compiler contract defined, and what exact source supports the answer?
+
+**PoC:**
+
+```sh
+python -m tower index --root . --output .tower/evidence.jsonl
+python -m tower search "View = compile" --evidence .tower/evidence.jsonl
+python -m tower evidence <id> --evidence .tower/evidence.jsonl
+```
 
 Implementation:
 
-- Define version 1 of the Representation IR and JSON schema.
-- Implement deterministic `refine`, `abstract`, `reify`, `trace`, `project`, `compose`, and `collapse` rules needed by Tasks A and B.
-- Implement causal, ownership, contract, and evidence text renderers.
-- Preserve ports and focus across local rewrites.
-- Record omissions and transformation history.
-- Add `tower map`, `tower refine`, `tower reframe`, `tower collapse`, and `tower explain`.
-- Build golden tests from small fixtures before applying rules to Neovim.
-- For one fixed Task B question and focus, produce candidate detail levels ranging from a signal or gist through a bounded 3–7-unit map, structured mechanism, and source evidence. Treat these levels as an experimental ladder, not as a fixed IR taxonomy or final UI control.
-- Vary detail, visible-unit budget, and viewpoint independently. Observe whether users retain the subject, can predict what refinement will reveal, reach sufficient evidence without overload, and return to a compressed representation without losing necessary conditions.
-- Run Task B with the baseline and textual PoC, then record a continue, revise, or stop decision using correctness, investigation effort, and evidence inspectability.
+- Index files, content hashes, and normalized source spans into an atomic JSON Lines snapshot.
+- Wrap `rg --json` rather than replacing textual search.
+- Assign reproducible IDs within a workspace snapshot.
+- Implement `index`, `search`, and `evidence`, including compact and JSON output.
+- Report stale spans when current content no longer matches the snapshot.
 
 Exit criteria:
 
-- One Task B representation combines an outer topology with an internally expanded causal region.
-- Reframing that region as ownership preserves its subject and external ports.
-- Every rendered unit resolves to deterministic evidence.
-- Collapsing returns to a semantically equivalent boundary representation.
-- The experiment records whether useful control over detail is best represented by discrete levels, a continuous budget, contextual selection, or no separate control, without adding scope beyond the question and focus.
-- The comparison establishes whether representation operations add enough value to justify another milestone.
+- Every result resolves to an exact span and collector provenance.
+- Repeating an unchanged index produces equivalent deterministic evidence.
+- Editing one Tower file invalidates that file without invalidating unrelated evidence.
+- This milestone is useful as an evidence-aware search tool even though it does not yet compile representations.
 
-### Milestone 4: Neovim and interactive terminal workflow
+### Milestone 2: first end-to-end representation compiler
 
-**Goal:** Make representations usable during ordinary source investigation.
+**Question:** Where are Tower's compiler and client responsibilities described, and how are those matches contained in the repository?
+
+**PoC:**
+
+```sh
+python -m tower map \
+  --evidence .tower/evidence.jsonl \
+  --question "Where are the compiler and client responsibilities described?" \
+  --intent locate-evidence \
+  --term compiler --term client \
+  --focus docs/DESCRIPTION.md \
+  --viewpoint topology \
+  --detail summary \
+  --budget-units 7
+```
 
 Implementation:
 
-- Implement the Lua Neovim plugin as a thin asynchronous client.
-- Add the commands listed in R8.
-- Implement representation buffers, stable node selection, source jumps, and provenance views.
-- Add `fzf` actions for mapping selected evidence and transforming saved representations.
-- Add session instrumentation shared by terminal and Neovim clients.
-- Run headless Neovim integration tests.
+- Use `rg` patterns to collect headings, exact terms, and surrounding text from Tower's documentation without parsing Markdown.
+- Introduce only repository, file, heading/match, `contains`, and `matched-by` evidence needed by the question.
+- Define Representation IR v1 and its JSON schema.
+- Implement `compile` and `map` with all six compiler inputs represented explicitly.
+- Resolve focus paths or IDs to stable evidence subjects.
+- Use question terms and intent for deterministic relevance; make unsupported interpretation visible rather than guessed.
+- Support topology and evidence-list viewpoints plus summary and evidence detail, so viewpoint and detail each have an observable effect.
+- Implement text renderers and `tower explain` for inclusion and omission decisions.
 
 Exit criteria:
 
-- A user can perform Task B entirely from Neovim, opening exact evidence as needed.
-- Cancellation and stale-index handling work without blocking or corrupting buffers.
-- The same saved Representation IR renders consistently in terminal and Neovim.
+- Changing the question changes relevance without changing the underlying evidence.
+- Changing focus changes the anchored subject.
+- Changing viewpoint, detail, or budget causes a defined and testable output change.
+- Every visible unit and connection resolves to evidence.
+- Budget overflow produces explicit omissions.
+- The saved Representation IR can be rendered again without re-running compilation.
 
-### Milestone 5: Amp observer and navigator skill
+### Milestone 3: cross-file and historical evidence
 
-**Goal:** Determine whether an AI coding agent can consume the representation system incrementally.
+**Question:** Which Tower files and revisions define how search evidence is collected and inspected?
+
+**PoC:** compile a bounded evidence or change view from `rg` matches and Git history, then inspect every visible source span and commit.
+
+Implementation:
+
+- Collect question terms and exact occurrences with `rg --json`.
+- Collect revision, log, diff, changed files, and line provenance with read-only Git commands.
+- Introduce only relationships supported by those tools: containment, matched-by, changed-in, line-attributed-to, and changed-with.
+- Mark changed-with as historical inference and textual occurrence as a match, never as a call, dependency, or cause.
+- Add evidence and change viewpoints; unsupported causal or ownership viewpoints return diagnostics.
+- Add fixture tests and golden Representation IR tests before compiling Tower itself.
+
+Exit criteria:
+
+- The evidence and change views answer the milestone question using Tower's own files and history.
+- Every connection is either directly observed through `rg`/Git or visibly marked as historical inference.
+- No textual mention or co-change is presented as a semantic dependency or causal claim.
+- The result stays within budget and identifies evidence omitted by compression.
+
+### Milestone 4: local transformations
+
+**Question:** Can one part of a Tower evidence view be expanded and restored without losing the surrounding explanation?
+
+**PoC:**
+
+```sh
+python -m tower refine <unit-id> --view <view.json>
+python -m tower trace <unit-id> --view <view.json>
+python -m tower project <relationship-type> --view <view.json>
+python -m tower collapse <region-id> --view <refined-view.json>
+```
+
+Implementation:
+
+- Implement `refine`, `trace`, `project`, and `collapse` as named rewrites over Representation IR.
+- Preserve the original subject, external typed connections, and stable region ports.
+- Record claims added, retained, and omitted by each rewrite.
+- Make detail and budget apply locally as well as to initial compilation.
+
+Exit criteria:
+
+- Refining one region leaves its surroundings semantically unchanged.
+- Collapsing restores an equivalent boundary representation.
+- Transformation history explains every difference between saved views.
+
+### Milestone 5: repeatable dogfooding evaluation
+
+**Question:** Does Tower help a person understand an unfamiliar Tower change more accurately or with less navigation than ordinary tools?
+
+**PoC:** run one pinned Tower investigation once with ordinary tools and once with the Tower CLI, then compare the two inspectable session records and scored answers.
+
+Implementation:
+
+- Pin Tower revisions that contain completed backend slices.
+- Define several answerable tasks over those revisions without encoding their answers in compiler rules.
+- Store ground-truth claims, required conditions, source spans, distractors, and answer rubrics separately from indexed evidence.
+- Compare ordinary `rg`, editor, and Git investigation with deterministic Tower.
+- Record queries, transformations, evidence opened, elapsed time, and submitted answers.
+- Evaluate correctness and omitted conditions, not diagram attractiveness.
+
+Exit criteria:
+
+- Another person can reproduce both baseline and Tower-assisted sessions.
+- At least one task exercises question, focus, viewpoint, detail, and budget independently.
+- A written decision says whether the compiler contract is useful enough to justify client work.
+
+## Client PoCs
+
+### Milestone 6: Amp observer and navigator
+
+**Entry condition:** Milestone 5 justifies an agent client.
+
+**Question:** Can an agent request a bounded view and incrementally inspect evidence instead of ingesting the repository indiscriminately?
+
+**PoC:** give Amp one pinned Tower question, inspect the bounded units and evidence it requests, and compare its answer with a session that uses ordinary repository tools.
 
 Implementation:
 
 - Load and follow Amp's skill-building guidance at implementation time.
-- Create the Observer version of the Tower skill around stable CLI commands.
-- Define bounded JSON response modes suitable for agent context windows.
-- Add commands that bundle a unit with its typed relationships and selected evidence.
-- Upgrade the skill to Navigator after Observer sessions establish a baseline.
-- Log Tower actions and inspected evidence IDs without logging hidden reasoning.
-- Run Tasks A–C in separate controlled Amp sessions with and without the skill.
+- Create an Observer skill around stable CLI JSON commands.
+- Return bounded units, typed relationships, omissions, and evidence handles.
+- Add Navigator transformations only after Observer sessions establish a baseline.
+- Record which units and evidence IDs the agent inspects without logging hidden reasoning.
 
 Exit criteria:
 
-- Amp can discover and use Tower without repository-specific instructions in the task prompt.
-- Tower output remains bounded and Amp can request additional evidence deliberately.
-- Answers are scored using the same rubric as human investigations.
-- Results report correctness, tool actions, evidence inspected, elapsed time, and context volume where measurable.
+- Amp can use Tower without Tower-specific instructions in the investigation prompt.
+- The agent can request more detail without exceeding the declared budget silently.
+- The same tasks are scored with and without Tower.
 
-### Milestone 6: AI proposal layer
+### Milestone 7: inspectable native UI
 
-**Goal:** Use AI to propose interpretations while preserving factual boundaries.
+**Entry condition:** textual use identifies an interaction problem that a persistent UI could plausibly solve.
+
+**Question:** Can a user inspect and navigate a saved Tower view more effectively in a persistent client without changing its semantics?
+
+**PoC:** open a saved Tower-on-Tower Representation IR file in the native app, select each unit, inspect its evidence, and compare the displayed semantics with the terminal renderer.
 
 Implementation:
 
-- Add the provider-neutral, capability-declaring `AiProposer` request/response schema.
-- Implement the first provider adapter for TypeSafe Jev through the HTTP API, with credentials loaded from `TYPESAFE_API_KEY` and no credential persistence.
-- Add a preview-first command that prints the endpoint, model, typed questions, selected evidence IDs/spans, and exact outbound excerpts; require an explicit send flag for the network request.
-- Use Jev for closed-set evidence relation, labels, relationship types, candidate responsibilities/groupings, viewpoint changes, and missing-evidence judgments. Keep broader free-form proposal generation outside the Jev adapter.
-- Validate all referenced IDs and source spans.
-- Record complete Choice/Score distributions, Choice/Score confidence, and Noul probabilities without converting confidence into factual status.
-- Render proposals distinctly from accepted and deterministic elements.
-- Implement accept, reject, edit, and rationale capture.
-- Store accepted proposals so representations can be replayed without the AI.
-- Test proposal quality and calibration on withheld Neovim evidence, contradictory and insufficient evidence, ambiguous candidate sets, and adversarial nonexistent identifiers.
-- Verify that missing credentials, network failure, rate limits, malformed responses, and provider disablement leave deterministic Tower operational.
+- Build a minimal SwiftUI macOS client that loads saved Representation IR.
+- Show the frame, units, typed connections, omissions, and evidence inspector.
+- Preserve stable selection while switching among existing compiled views.
+- Open exact source spans through an explicit user action.
+- Keep presentation state separate from Representation IR.
 
 Exit criteria:
 
-- No invented entity or source span can enter an accepted representation unnoticed.
-- A complete representation can distinguish deterministic, historical, human, and AI provenance.
-- No repository content is sent without a visible manifest and explicit send action, and default logs contain no source excerpts or API keys.
-- Jev outputs remain proposals until deterministic validation or a recorded human disposition accepts them.
-- Jev improves at least one measured Task B or C outcome over deterministic Tower without reducing correctness.
+- One saved view renders consistently in the terminal and native client.
+- Every visible semantic element links to the same evidence in both clients.
+- UI state cannot alter claims, relationship types, or provenance.
+- Representative states pass visual and accessibility inspection.
 
-### Milestone 7: strategic-map visualization experiment
+### Milestone 8: strategic-map experiment
 
-**Entry condition:** Milestone 3 and subsequent textual workflows show that Tower improves at least one selected investigation, and the remaining evaluation identifies a spatial question that text cannot answer well.
+**Entry condition:** Milestone 7 identifies a concrete orientation or local-transformation problem that conventional panels do not solve well.
 
-**Goal:** Test whether a grand-strategy interaction model adds value without turning representations into decorative geography.
+**Question:** Does spatial interaction improve focus continuity or comprehension over the inspectable native UI?
+
+**PoC:** perform the same local refinement on one saved Tower view in conventional and spatial presentations, then compare focus continuity and answer correctness.
 
 Implementation:
 
-- Define the smallest visual hypothesis and acceptance criteria before implementing the client.
-- Pin the Xcode and macOS deployment targets and a compatible Ghostty revision. Record licenses, required build tools, framework requirements, and supported macOS/CPU targets.
-- Build a minimal SwiftUI macOS application that hosts an `MTKView` through an AppKit representable, and verify that it selects a Metal device and presents a rendered frame before building Tower UI code.
-- Expose the public `libghostty-vt` C ABI through a Clang module, isolate it behind a typed Swift wrapper, and verify struct sizes, callbacks, ownership, and borrowed-data lifetimes against the pinned headers.
-- Implement the PTY/process boundary in Swift: child output feeds `libghostty-vt`, encoded keyboard/mouse/paste/focus input returns to the PTY, and synchronous terminal effects are queued or handled without re-entering the terminal.
-- Render a Ghostty render-state snapshot with Metal, including grapheme clusters, styles, cursor, selection, resize, and scrollback, rather than implementing a second terminal parser.
-- Build one bounded Task B visual prototype with a world viewport, map-mode controls, contextual inspector, and evidence panel.
-- Implement orbit, pan, tilt, perspective/orthographic switching, camera-altitude semantic zoom, stable selection, bookmarks, animated viewpoint transitions, and return-to-focus.
-- Implement responsibility territories and volumes, typed borders, elevated causal/event routes, ownership and contract layers, change terrain/heat, and confidence/provenance overlays.
-- Implement isolation, vertical slicing, exploded layers, transparency, cutaways, level-of-detail, and label decluttering.
-- Implement nested heterogeneous regions, typed ports, local expansion, local reframing, evidence drawers, omissions, and provenance styling.
-- Begin with explicit 3D layouts for topology, flow, ownership, and source evidence rather than one force-directed graph or universal terrain layout.
-- Save semantic content as Representation IR and presentation/camera state as separate Scene IR.
-- Add deterministic screenshots and serialized scene fixtures for visual regression tests.
-- Link every source-backed element to Neovim through a local open command with explicit user action.
+- Define one bounded spatial hypothesis and acceptance criteria before writing the viewport.
+- Host an `MTKView` through SwiftUI and render one Tower-on-Tower representation with Metal.
+- Implement only the camera, selection, local expansion, and viewpoint transition behavior required by that hypothesis.
+- Keep semantic zoom tied to `Detail`; camera movement alone must not fabricate semantic detail.
+- Store transforms and camera state in Scene IR, separate from Representation IR.
+- Compare the spatial view with an orthographic or conventional presentation of the same representation.
 
 Exit criteria:
 
-- A reproducible clean build produces a native macOS SwiftUI application using Metal and the pinned `libghostty-vt` artifact.
-- A diagnostic reports the selected Metal device and active renderer; creating the viewport fails visibly if Metal is unavailable rather than silently selecting another renderer.
-- The embedded terminal can run the Tower CLI through a PTY, survive resize, display representative Unicode and styled output, and route keyboard input and terminal-generated replies correctly.
-- Task B can retain system context while its RPC edge expands into a causal mechanism and one queue unit reframes into ownership.
-- Switching among causal, ownership, contract, change, and provenance map modes preserves the selected subject and recognizable landmarks.
-- Changing camera altitude changes the represented information rather than merely scaling labels and geometry.
-- Every use of elevation, depth, or volume has a visible semantic legend and can be flattened into a precise orthographic view.
-- A user can select and inspect a deeply nested or initially occluded subject through isolation or cutaway controls.
-- Moving the revision-time control updates changed regions without implying that co-change is causality.
-- The visualization never uses an unlabeled generic relationship edge.
-- Representative default and transformed states pass visual inspection and accessibility checks.
-- Evaluation shows whether spatial interaction improves outcomes over the Neovim text representation.
-- A written decision states whether to discard the prototype, iterate on it, or begin product design; the prototype itself is not treated as the product foundation.
+- Spatial presentation consumes unchanged Representation IR.
+- Selection and focus survive local expansion and viewpoint changes.
+- Every spatial encoding has an explicit semantic legend and a precise inspectable alternative.
+- Evaluation supports discarding, revising, or continuing the spatial approach.
 
-Risk gates:
+An embedded terminal, `libghostty-vt`, PTY integration, revision-time terrain, and additional map modes are separate future experiments. None is a prerequisite for validating the compiler formula or the first graphical client.
 
-- Pin the minimum macOS version before relying on SwiftUI or Metal APIs introduced after that version; availability checks must not become an accidental second UI implementation.
-- Keep SwiftUI state updates off the per-frame rendering path. If representable lifecycle or input bridging cannot satisfy the prototype's latency and control requirements, use a narrow AppKit host rather than adding a cross-platform engine.
-- `libghostty-vt` promises neither source nor ABI stability. Upgrading the pinned revision requires rerunning ABI and terminal integration tests before visual work continues.
-- Compile every Metal shader used by the prototype in clean and release builds, and test it on each supported Apple GPU family rather than inferring compatibility from the default scene.
+## Later gates
 
-### Milestone 8: generalization and runtime evidence
-
-**Goal:** Determine whether the grammar generalizes beyond manually selected static cases.
-
-Implementation:
-
-- Complete Task C support without Neovim-specific hard-coded representation rules.
-- Introduce an import format for optional runtime events and traces.
-- Add observed temporal relationships without conflating them with all possible behavior.
-- Test the same grammar on a second, smaller repository with different architecture.
-- Profile indexing and representation queries before considering a persistent daemon.
-- Decide whether a packaged desktop shell, language-server integration, or additional parsers are justified by evidence.
-
-Exit criteria:
-
-- Core rewrite rules work on the second corpus with configuration and extractors, not source-specific code.
-- Static possibilities and observed runtime paths remain visibly distinct.
-- A written evaluation supports continuing, revising, or rejecting the representation-compiler thesis.
+AI-proposed interpretation, runtime traces, syntax-aware tooling, and testing on repositories other than Tower remain possible follow-up experiments. They are deliberately outside this plan until Tower-on-Tower demonstrates value and the `rg`/Git approach exposes a concrete limitation. When introduced, they must preserve the compiler contract: proposed facts remain distinguishable from evidence, all visible claims retain provenance, and client presentation never becomes semantic authority.

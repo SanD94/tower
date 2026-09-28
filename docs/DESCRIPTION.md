@@ -24,29 +24,29 @@ The investigation then becomes a repeated loss and reconstruction of context:
 1. A directory gives an initial location but not necessarily a responsibility.
 2. Search produces occurrences without explaining which ones participate in the behavior.
 3. Following calls reveals local mechanics while the larger purpose disappears from view.
-4. VCS explains individual changes but not the current system as a coherent whole.
+4. VCS explains changes but not the current system as a coherent whole.
 5. Tests reveal important contracts, often only after the relevant test vocabulary/glossary is known.
 6. Notes and diagrams in documentation provide interpretation but as they are not easy to manage to sync with code, they may no longer match the code.
 7. As mentioned, AI would help but the person cannot easily see what was excluded or which statements are mis/interpretations.
 
 The burden of maintaining the whole model remains in the person's working memory. More search results or a larger graph to represent the codebase can increase that burden rather than reduce it. The desired system must externalize the evolving mental model while allowing the person to challenge every part of it.
 
-### 1.2 Example: A concrete Neovim investigation
+### 1.2 Example: A concrete Tower investigation
 
 Consider the question:
 
-> Why does one Neovim RPC request execute immediately while another enters the editor through `K_EVENT`?
+> Where is Tower's search evidence defined, how did those files change, and which exact lines support the answer?
 
 The answer is not located in one folder or represented by one relationship. One must connect:
 
-- RPC decoding and request handling.
-- Generated handler metadata that classifies an API as fast or deferred.
-- Different event queues and execution contexts.
-- Admission into the editor state machine through `K_EVENT`.
-- The safety restrictions and behavioral consequences of each path.
-- Tests that establish the intended contract.
+- Documentation that describes search evidence.
+- Source occurrences of the relevant command and terms.
+- The files and source spans containing each occurrence.
+- Commits and diffs that changed those files.
+- Line provenance for the selected evidence.
+- Candidate tests found by explicit names, without claiming a semantic test relationship.
 
-`rg` can find `K_EVENT`. Any editor with LSP can navigate symbols. `fzf` can narrow candidates. VCS can explain how relevant lines changed. An AI can help connect them. However, none of the tools owns the representation that emerges from the investigation.
+`rg` can find the terms and Git can explain how the matching lines changed. `fzf` can narrow and preview candidates. However, none of these tools owns the bounded representation that emerges, records what it omitted, or preserves the same subject while one evidence region is refined.
 
 The proposed solution is that there should be an inspectable, revisable representation which can allow different point of views for one to look at.
 
@@ -73,11 +73,11 @@ The implementation proposed below follows from these requirements.
 
 ## 2. Proposed solution: a representation compiler
 
-The system that we call as "Tower" will be a **local-first representation compiler for codebases**.
+The system that we call as "Tower" will be a **representation compiler for codebases**.
 
-It will maintain typed, provenance-bearing evidence and compile that evidence into a representation appropriate to a question, focus, viewpoint, and cognitive budget.
+It will maintain typed, provenance-bearing evidence and compile that evidence into a representation appropriate to a question, focus, viewpoint, detail, and cognitive budget.
 
-Tower starts as a proof of concept, not as a product implementation. The first goal is to learn whether a small representation compiler helps with the selected Neovim investigations. Architecture, performance, packaging, and a graphical shell are deliberately deferred until that claim has evidence behind it.
+Tower starts as a proof of concept, not as a product implementation. The first goal is to learn whether a small representation compiler helps us investigate Tower itself as it is built. Architecture, performance, packaging, integrations, and a graphical shell are deliberately deferred until the CLI establishes that claim.
 
 Hierarchy will appear as a side effect of operations such as abstraction, containment, and refinement. Hence, it is expected that it will not be the canonical storage model.
 
@@ -87,24 +87,47 @@ Conceptually:
 View = compile(Evidence, Question, Focus, Viewpoint, Detail, Budget)
 ```
 
-A representation in Tower must be able to shift locally. For example, in neovim case, a system topology may retain its high-level client and editor nodes while the RPC edge between them expands in place into a causal flow. Similar to local spaces defined by nonlinear terms, the entire canvas must not be forced into one global level or one visual notation.
+This is the central contract, not illustrative notation:
+
+- **Evidence** is the versioned set of facts and provenance the compiler may use.
+- **Question** states the information need. During the deterministic PoC it consists of text, an explicit intent, and explicit search terms; unrestricted natural-language interpretation is not assumed.
+- **Focus** anchors compilation to stable subjects in the evidence graph.
+- **Viewpoint** chooses the relationship meanings and representation forms relevant to the question, such as topology, causality, ownership, or contract.
+- **Detail** controls explanatory granularity, from summary through mechanism to source evidence. It is semantic refinement, not graphical magnification.
+- **Budget** is a structured set of hard resource limits, such as maximum visible units and maximum included evidence bytes. The first PoC supports a visible-unit limit; later dimensions are added only when measured. Relevant material excluded by any limit is recorded as an omission.
+
+The resulting **View** is Representation IR. It contains the complete input frame, visible units, typed connections, provenance, omissions, and transformation history; it is not a screen layout. Every supported input must have an observable and testable effect on compilation. Unsupported interpretation must remain explicit rather than being replaced by a plausible guess.
+
+Compilation applies the inputs in a defined order:
+
+1. Validate the evidence snapshot and resolve the focus to one or more stable subjects.
+2. Convert the question's explicit intent and search terms into deterministic relevance criteria. Preserve its text as the human-readable information need.
+3. Project the focused evidence through the relationship types allowed by the viewpoint.
+4. Select abstractions or expansions appropriate to the requested detail.
+5. Fit the candidates to the budget, preserving required context and recording excluded relevant candidates as omissions.
+6. Materialize the view with its frame, provenance, diagnostics, and transformation history.
+
+The dimensions constrain one another but do not take over one another's roles. The question determines what would be relevant; focus determines which subject the answer remains about; viewpoint determines how evidence is organized; detail determines the explanatory granularity; and budget determines how much of that explanation is visible. A budget must not alter factual status, a viewpoint must not create evidence, and detail must not mean screen scale. If the focus cannot be resolved or the evidence cannot support the question under the requested viewpoint, compilation produces a diagnostic View with no fabricated semantic units.
+
+A representation in Tower must also be able to shift locally. For example, a topology of Tower may retain its CLI and evidence-store units while the search connection between them expands in place into a causal flow. The entire representation must not be forced into one global detail level or visual notation.
 
 ## 3. What would falsify the thesis
 
-Tower is not successful merely because it produces attractive diagrams or plausible summaries. The claims about Tower should be considered unsupported if, on representative Neovim investigations:
+Tower is not successful merely because it produces attractive diagrams or plausible summaries. The claims about Tower should be considered unsupported if, on representative Tower-on-Tower investigations:
 
 1. Users cannot answer behavioral questions more accurately than with classical IDE systems or with AI agents.
 2. Generated groupings with the representation cannot explain why their members belong together.
 3. Representations routinely hide conditions needed to predict behavior.
 4. Moving between viewpoints causes the user to lose the original focus and to distract completely, leading to frustration.
-6. The implementation works only through hard-coded knowledge of a project at hand, i.e. Neovim above.
-7. Any AI agent cannot use the system by the help of human with the aim to reduce the token usage. Its existing search and shell tools would solve the problem but what matters here is that the context should be narrowed down thanks to human becoming familiar with the codebase.
+5. Question, focus, viewpoint, detail, or budget are merely labels and do not predictably change the compiled view.
+6. The implementation relies on hard-coded answers about Tower rather than generic evidence and compilation rules.
+7. An AI agent gains no useful context control over its existing search and shell tools.
 
 ## 4. Tower principles
 
 ### 4.1 Evidence before interpretation
 
-Deterministic extractors establish files, symbols, references, calls, generated-from relationships, changes, test associations, and runtime observations. AI may propose interpretations of that evidence, but it should be handled more rigorously.
+The initial deterministic collectors establish repositories, revisions, files, exact text matches, source spans, diffs, history, and line provenance through `rg` and Git. These tools do not establish calls, ownership, causality, or intent. Semantic relationships may be added later from another explicit evidence source or proposed by a human or AI, but must never be inferred merely because text matches or files changed together.
 
 ### 4.2 Every visible claim is inspectable
 
@@ -127,41 +150,34 @@ The long-term visualization hypothesis is that Tower could provide the strengths
 
 ## 5. Scope
 
-The scope is very limited at the moment to see whether Tower will be working. To begin with, we need a repo for experimentation. For this reason, To apply representation grammar we define in Tower, we pick a pinned revision of `sand94/neovim` located in ~/projects/github.com/sand94/neovim/ for the following reasons:
+The Tower repository is the initial experimental corpus. Each executable slice is used to investigate the source and documentation added by earlier slices. This keeps every milestone locally runnable, exercises the tool during its own development, and lets the evidence model grow from observed needs rather than a speculative universal schema.
 
-- It includes C and Lua source, CMake generation rules, tests, and runtime files needed by the selected investigations.
-- It has a lot of symbols to work on to understand how representations work.
-- The problems in the repo require different viewpoints: causal, ownership, and contract/evidence.
-- The layering system in Neovim does not depend on folder structure system, rather a convoluted relationship among different systems working together.
-
+Self-hosting does not by itself establish that Tower generalizes to large, heterogeneous repositories. It is the bootstrap and product-discovery loop. Additional languages, runtime evidence, and external corpora become separate experiments only after Tower-on-Tower shows that the compiler contract is useful.
 
 ## 6. System architecture
 
 ```text
-                                   clients
-          +-----------+----------+------------------------------+
-          |           |                                         |
-       Neovim       Amp skill                  SwiftUI strategic-map client
-          |           |                          |              |
-          |           |                   libghostty-vt    Metal/MetalKit
-          |           |                    terminal/PTY       2D/3D UI
-          +-----------+----------+------------------------------+
+                              clients
+                +----------------+----------------+
+                |                |                |
+           terminal text     Amp skill      native client
+                +----------------+----------------+
                                  |
-                       experimental CLI / JSON files
+                   Representation IR / JSON files
                                  |
                      +-----------v------------+
                      | representation compiler |
-                     | rules, views, rewrites  |
+                     | question, frame, rules  |
                      +-----------+------------+
                                  |
                      +-----------v------------+
-                     | evidence snapshots      |
-                     | JSON + source spans     |
+                     | typed evidence snapshots|
+                     | JSONL + source spans     |
                      +-----------+------------+
                                  |
-          +-----------+----------+----------+-------------+
-          |           |                     |             |
-         rg       syntax indexers         git/jj       runtime traces
+                         +-------+-------+
+                         |               |
+                        rg              Git
 ```
 
 
@@ -171,46 +187,46 @@ The scope is very limited at the moment to see whether Tower will be working. To
 
 Use Python 3 for the first `tower` CLI because it minimizes implementation ceremony and makes representation rules and intermediate data easy to inspect and change. The PoC should be one package with straightforward modules, standard-library data structures, subprocess calls to existing tools, and tests. It should not introduce a plugin framework, daemon, async architecture, or distribution work before those are needed by an experiment.
 
+Python orchestrates `rg` and Git and transforms their explicit output; it is not a source-analysis mechanism.
+
 Python is a PoC choice, not the visual-client implementation language. If the textual experiments justify the strategic-map client, that client will be a native macOS application written in Swift, with SwiftUI for the application interface and Metal for the spatial viewport. The representation compiler remains a separate process with an inspectable protocol. Rewriting the compiler in Swift is a separate decision that requires measured constraints such as startup time, indexing throughput, memory use, deployment, or integration; choosing Swift for the client does not itself justify a rewrite.
 
 ### 7.2 Evidence storage: inspectable files first
 
-Store the small, pinned experiment's entities, relationships, claims, provenance, and representations as versioned JSON or JSON Lines artifacts. Source text remains in the working tree; artifacts contain paths, revisions, source spans, hashes, and extractor metadata.
+Store Tower's entities, relationships, claims, provenance, and representations as versioned JSON or JSON Lines artifacts. Source text remains in the working tree; artifacts contain paths, revisions, source spans, hashes, and collector metadata.
 
 Don't design a database schema during the PoC. Move to SQLite or another store only when artifact size, query behavior, or incremental updates create a measured problem. The JSON format is disposable and may evolve while the representation model is being learned.
 
-### 7.3 Parsing and search
+### 7.3 Evidence collection
 
-- Use `rg --json` for exact-text discovery and streaming search results.
-- Begin with `rg`, source spans, and small task-specific extractors. Add Tree-sitter for C or Lua only when a selected experiment needs syntax evidence that simpler extraction cannot provide reliably.
-- Use build files and generator scripts as evidence; do not treat generated files as unrelated modules.
-- Use language-server data later only where it adds relationships that the PoC cannot establish reliably.
-- Preserve extractor name and version on every derived fact.
+- Use `rg --files` for file discovery and `rg --json` for exact or regular-expression matches and context.
+- Use read-only Git commands for revision identity, status, log, diff, changed files, and line provenance.
+- Use optional `fzf` only to select and preview evidence for user themselves, by which it produces semantic facts.
+- Recognize simple textual forms, such as Markdown headings, with explicit `rg` patterns rather than a parser.
+- Preserve collector name, command parameters, and version on every derived fact.
+- Add syntax-aware tooling only after an experiment records a concrete question that `rg` and Git cannot support.
+- Suggest experiments if evidence at hand is not sufficient.
 
 ### 7.4 User interfaces
 
-The interfaces are introduced here in order for one to understand how one can communicate with the system but it's detailed in Milestones (13) section.
+Interfaces arrive only after the backend behavior they consume is executable:
 
-- **Milestones 1–3:** terminal output, JSON, and optional `fzf` selection/preview.
-- **Milestone 4:** a Lua Neovim plugin using asynchronous jobs and quickfix/location lists.
-- **Milestone 7:** only after the textual PoC shows value, a bounded native macOS prototype built with SwiftUI, MetalKit, Metal, and `libghostty-vt` tests whether a strategic-map interaction adds value.
+- **Milestones 0–5:** CLI, terminal output, JSON/JSON Lines, and optional `fzf` selection/preview.
+- **Milestone 6:** an Amp skill tests bounded agent consumption of the same CLI contract.
+- **Milestone 7:** a SwiftUI client tests persistent inspection of saved Representation IR.
+- **Milestone 8:** only after a specific spatial question is identified, a Metal viewport tests strategic-map interaction.
 
 ### 7.5 Strategic-map client stack
 
-The native strategic-map client will use:
+If the textual and inspectable-UI experiments justify a strategic map, the native client will use:
 
 - **Swift** for application state, input routing, Scene IR handling, layout, and orchestration.
 - **SwiftUI** for the macOS application shell, commands, inspectors, controls, and accessibility integration.
 - **MetalKit and Metal** for the interactive 2D/3D viewport, cameras, geometry, text surfaces, picking, and GPU rendering.
-- **`libghostty-vt`** through its C ABI for terminal emulation, screen state, scrollback, selection, and keyboard/mouse encoding in an embedded terminal surface.
 
-These components have deliberately narrow ownership. SwiftUI owns application-level composition and native controls; it hosts an `MTKView` through an AppKit representable for rendering that needs direct frame and input control. Metal owns only the spatial and terminal drawing paths. `libghostty-vt` does not create a PTY, launch processes, draw glyphs, or own a window. The Swift client must own the child process and PTY, forward child output and terminal responses, translate GUI input through Ghostty's encoders, and render Ghostty's borrowed render-state cells with Metal. The representation compiler remains the source of semantic truth; the visual client consumes Representation IR and stores camera and presentation state separately as Scene IR.
+These components have deliberately narrow ownership. SwiftUI owns application-level composition and native controls; it hosts an `MTKView` through an AppKit representable only when rendering needs direct frame and input control. Metal owns the spatial drawing path. The representation compiler remains the source of semantic truth; the visual client consumes Representation IR and stores camera and presentation state separately as Scene IR.
 
 The client will use Apple's native frameworks directly rather than introducing a game engine or cross-platform rendering abstraction. SwiftUI views must not own per-frame rendering state: a dedicated renderer object coordinates the `MTKView`, command queue, render passes, resource lifetimes, and Scene IR snapshots. AppKit interoperation should remain limited to capabilities that SwiftUI does not expose precisely enough, such as the Metal view and low-level keyboard or pointer handling.
-
-`libghostty-vt` also has an evolving public API. Tower will pin a Ghostty revision, expose only its public C headers through a Clang module, initialize sized C structs correctly, use accessors instead of depending on packed cell layouts, and isolate raw imports behind a small typed Swift layer. Synchronous callbacks must remain non-blocking and non-reentrant; borrowed render data must not survive a render-state update.
-
-This initial client target is macOS on Metal. Portability of the compiler and textual clients remains unchanged. A non-Metal renderer or another desktop platform is future work and must not complicate the first spatial experiment.
 
 ## 8. Core domain model
 
@@ -227,19 +243,15 @@ Required fields:
 - Repository/workspace identity.
 - Revision or working-copy identity.
 - Source span where applicable.
-- Display name and language.
-- Content hash (?)
-- Extractor provenance (?)
+- Display name.
+- Content hash where applicable.
+- Collector provenance.
 
-Initial entity types:
+PoC entity types:
 
 - Repository, revision, working copy.
 - Directory and file.
-- Build target and generated artifact.
-- Module, type, function, method, field, and global.
-- Test and fixture.
-- API method and event.
-- Queue, execution context, and state owner.
+- Search query and source match.
 - Commit/change and author identity.
 
 #### Relationship
@@ -253,21 +265,19 @@ Required fields:
 - Derivation method.
 - Confidence and status: observed, declared, statically derived, historically inferred, or AI-proposed.
 
-Initial relationship types:
+PoC relationship types:
 
-- Contains and declares.
-- Imports/includes and references.
-- Calls.
-- Reads and mutates.
-- Enqueues and consumes.
-- Generates and generated-from.
-- Implements and tests.
-- Precedes.
-- Changed-with.
+- Contains.
+- Matched-by.
+- Changed-in.
+- Line-attributed-to.
+- Changed-with, always marked as historical inference rather than semantic coupling.
+
+Relationships such as declares, references, calls, mutates, owns, generates, implements, and precedes remain part of Tower's intended vocabulary, but they do not enter the PoC evidence graph until an explicit source can support them. A matching identifier is a source match, not a reference or call.
 
 #### Claim
 
-A claim is a statement intended for a representation, such as, in neovim case, “ordinary RPC requests execute through the editor event queue”, treated as a first class citizen in Tower. Claims reference one or more entities and relationships and retain their complete evidence set. Claims may be deterministic, human-authored, or AI-proposed. It can be tested accordingly.
+A claim is a statement intended for a representation. For example, “the `search` command normalizes every `rg` match into a source span” may be a human-authored claim supported by several matches; `rg` alone does not make it deterministic. Claims reference one or more entities and relationships, retain their complete evidence set, and remain visibly classified as deterministic, human-authored, or AI-proposed.
 
 ### 8.2 Representation IR
 
@@ -276,7 +286,7 @@ The Representation IR is separate from the evidence graph. It describes what is 
 Required concepts:
 
 - **Subject:** the stable concept or evidence set being represented.
-- **Frame:** the current question, viewpoint, and assumptions.
+- **Frame:** the complete compilation request: question and intent, focus, viewpoint, detail, budget, and assumptions.
 - **Unit:** a visible explanatory element backed by claims.
 - **Typed connection:** a visible relationship with one explicit meaning.
 - **Region:** a compositional scope that may use its own representation form.
@@ -285,18 +295,13 @@ Required concepts:
 - **Provenance:** links from every unit and connection to claims and evidence.
 - **Transformation history:** rules that produced the current representation.
 
-Initial representation forms:
+PoC representation forms:
 
-- Topology.
-- Functional decomposition.
-- Directed causal flow.
-- Decision tree.
-- State/ownership region.
-- Contract provider/consumer view.
-- Ordered timeline.
+- Repository/file topology.
+- Change/history view.
 - Evidence list and annotated source.
 
-The IR must support nested heterogeneous forms. For example, a topology edge may be replaced with a causal-flow region whose output port reconnects to the original destination.
+Later experiments may add functional decomposition, causal flow, decision trees, ownership, contracts, and timelines when their required semantic evidence exists. The IR must eventually support nested heterogeneous forms, but the PoC must first prove local transformations over repository, change, and evidence forms.
 
 ### 8.3 Representation transformations
 
@@ -305,15 +310,11 @@ Every transformation is a named, testable rewrite over the Representation IR.
 Initial operations:
 
 1. **Refine:** replace one unit with its supporting mechanism.
-2. **Abstract:** compress several units into one responsibility.
-3. **Reframe:** preserve the subject while changing viewpoint.
-4. **Reify relationship:** turn an edge into an inspectable region.
-5. **Trace:** retain only elements participating in an outcome.
-6. **Contextualize:** add surrounding dependencies without refining the subject.
-7. **Compare:** align two paths, revisions, or implementations under one frame.
-8. **Project:** hide irrelevant dimensions and record omissions.
-9. **Compose:** place representations with different local forms in one scene.
-10. **Collapse:** restore a transformed region to its boundary summary.
+2. **Trace:** retain only elements connected through an explicit relationship type.
+3. **Project:** hide irrelevant dimensions and record omissions.
+4. **Collapse:** restore a transformed region to its boundary summary.
+
+Abstract, reframe, reify relationship, contextualize, compare, and compose are later candidates. They should be added only when a PoC question requires them and the evidence model can preserve their semantics.
 
 Each rule must declare:
 
@@ -343,7 +344,7 @@ All clients and transformations must preserve:
 
 ### R1. Workspace and revision identity
 
-- Identify the current revision and working-copy state without mutating either VCS.
+- Identify the current Git revision and working-copy state without mutating it.
 - Pin experimental snapshots so results remain reproducible.
 - Keep uncommitted changes distinguishable from indexed base content.
 
@@ -352,18 +353,18 @@ All clients and transformations must preserve:
 - Enumerate searchable files through `rg --files` while honoring repository ignores.
 - Execute exact and regular-expression searches through `rg --json`.
 - Convert matches into normalized source spans.
-- Stream search results to terminal, `fzf`, Neovim, and Amp clients.
+- Stream search results to terminal, `fzf`, editor, and Amp clients.
 
-### R3. Structural and syntactic indexing
+### R3. Textual evidence
 
-- Extract C and Lua symbols, declarations, definitions, and syntax-level references.
-- Index relevant CMake targets and generator input/output relationships.
-- Associate functional tests with referenced APIs and symbols using deterministic evidence.
+- Collect exact and regular-expression matches, context lines, and simple forms such as headings through explicit `rg` queries.
+- Preserve the query that produced each match and never upgrade a match to a symbol reference, call, dependency, or cause.
+- Use file paths and explicit naming patterns to find candidate tests, while labeling the result as textual evidence rather than a tests relationship.
 - Update only files whose content hashes changed.
 
-### R4. VCS evidence
+### R4. Git evidence
 
-- Provide equivalent read-only adapters for Git and Jujutsu concepts: revision, changed files, diff, history, author, and line provenance.
+- Collect revision, dirty state, changed files, diff, history, author, and line provenance through read-only Git commands.
 - Compute changed-with relationships over a configurable history window.
 - Never assume that co-change proves semantic coupling; mark it as historical inference.
 - Allow representation comparison between two revisions or working-copy states.
@@ -371,15 +372,20 @@ All clients and transformations must preserve:
 ### R5. Evidence inspection
 
 - Given any entity, relationship, or claim, print its complete provenance.
-- Open source evidence in Neovim at the exact span.
-- Preview evidence in `fzf` without requiring Neovim.
+- Emit source locations that editors and clients can open at the exact span.
+- Preview evidence in `fzf` without requiring an editor integration.
 - Report stale evidence when file hashes no longer match.
 
 ### R6. Representation compilation
 
-- Compile a representation from a question, focus, viewpoint, and unit budget.
+- Compile a representation according to `View = compile(Evidence, Question, Focus, Viewpoint, Detail, Budget)`.
+- Store the complete compilation frame in the resulting Representation IR.
+- Make every supported input operational: changing it must have a defined, testable effect or produce an explicit unsupported result.
+- Use explicit question intent and search terms for deterministic relevance before unrestricted natural-language interpretation exists.
+- Treat detail as semantic granularity and budget as structured hard limits. Initially implement only a maximum-visible-units limit.
+- Record relevant excluded material as omissions when the budget or projection removes it.
 - Support deterministic rule-only compilation before AI assistance is introduced.
-- Permit local refinement and local viewpoint changes.
+- Permit local refinement. Defer local viewpoint changes until more than one evidence-backed semantic viewpoint exists.
 - Save, reload, diff, and export Representation IR.
 - Explain why each unit was included and why adjacent evidence was excluded.
 
@@ -388,18 +394,16 @@ All clients and transformations must preserve:
 - Search for a subject with `rg`-backed discovery.
 - Select evidence or a saved representation through `fzf`.
 - Preview source, provenance, and representation summaries.
-- Run refine, reframe, trace, and collapse operations from selected items.
+- Run refine, project, trace, and collapse operations from selected items.
 - Emit commands suitable for shell scripting rather than requiring an interactive UI.
 
-### R8. Neovim workflow
+### R8. Client protocol
 
-- Provide `:TowerSearch`, `:TowerMap`, `:TowerRefine`, `:TowerReframe`, `:TowerEvidence`, and `:TowerChanges` commands.
-- Run Tower asynchronously and support cancellation.
-- Use quickfix/location lists for source-backed collections.
-- Open a representation in a dedicated buffer with stable node IDs and navigable links.
-- Open exact source spans in ordinary windows.
-- Preserve the user's current window and jump-list behavior.
-- Initially render text and Unicode structures; launch or focus the strategic-map client only for representations that benefit from spatial interaction.
+- Treat Representation IR as the semantic boundary for terminal, agent, and graphical clients.
+- Keep layout, camera, panels, and selection outside Representation IR.
+- Require clients to preserve stable subject and unit IDs when switching presentation or requesting a transformation.
+- Let clients open exact source spans without making the client the authority for evidence.
+- Ensure the terminal renderer remains sufficient to inspect every semantic field exposed by a richer client.
 
 ### R9. Amp integration
 
@@ -432,7 +436,7 @@ All clients and transformations must preserve:
 - Provide isolation, slicing, exploded, transparency, and cutaway controls for inspecting nested or occluded regions.
 - Preserve recognizable landmarks and selection across map-mode changes wherever the underlying subjects remain the same.
 - Provide map modes for responsibility, causality, ownership, contracts, change/history, and confidence/provenance; each mode defines its own borders, overlays, routes, labels, and available actions.
-- Let camera altitude change representation grammar: distant views show territories, volumes, and major routes; intermediate views show mechanisms and interfaces; close views expose operations and source evidence.
+- Let camera altitude request a different `Detail` value when appropriate; the compiler, not geometric scaling, decides which semantic units appear. Distant views may show territories and major routes while close views expose mechanisms and evidence.
 - Render heterogeneous nested regions rather than forcing one graph layout. A selected volume may contain a flow, state machine, timeline, layered structure, or source panel.
 - Provide an outliner, command/search palette, contextual inspector, hover tooltips, legend, and revision-time control around the map.
 - Render typed calls, events, queue transfers, or observed runtime flow as unambiguous 3D routes whose direction remains readable from supported camera angles. Motion must communicate state rather than decorate it.
@@ -458,7 +462,7 @@ All clients and transformations must preserve:
 ### R13. Evaluation instrumentation
 
 - Record task start/end, queries, transformations, evidence opened, and answers submitted.
-- Support baseline sessions using ordinary `rg`, `fzf`, Neovim, and Git/Jujutsu without generated representations.
+- Support baseline sessions using ordinary `rg`, `fzf`, an editor, and Git without generated representations.
 - Support Tower-assisted sessions for the same pinned revision and task.
 - Keep self-reported usefulness separate from correctness and navigation measurements.
 - Export anonymizable session data as JSON.
@@ -489,24 +493,23 @@ Product-level performance targets should be set from observed PoC usage.
 ### Portability
 
 - The PoC supports the development environment first and avoids unnecessary platform-specific APIs.
-- Python 3, Git, and `rg` are required external tools initially; `fzf`, Jujutsu, Neovim, and Amp integrations are optional capabilities.
+- Python 3, Git, and `rg` are required initially; `fzf`, editor integrations, and Amp are optional capabilities.
 - Paths and command invocation must support spaces and non-ASCII characters.
-- The Milestone 7 native client initially targets macOS with Metal and is not a portability requirement for the representation compiler or textual clients.
+- The native clients in Milestones 7–8 target macOS and are not portability requirements for the representation compiler or textual clients.
 
 ### Testability
 
-- Extractors use fixture repositories.
+- Evidence collectors use fixture repositories.
 - Transformation rules use golden Representation IR tests.
 - Renderers test the same IR independently.
-- Integration tests use temporary Git and Jujutsu repositories.
-- Neovim tests run headlessly.
-- The native client keeps XCTest ABI smoke tests for its pinned `libghostty-vt` headers, PTY integration fixtures, and screenshot tests for representative Metal-rendered scenes, SwiftUI states, and terminal states.
+- Integration tests use temporary Git repositories.
+- The native client uses serialized scene fixtures and screenshot tests for representative SwiftUI and Metal-rendered states.
 
 ## 11. Tool integration in practice
 
 ### 11.1 `rg`
 
-Tower should invoke `rg --json` and preserve its match precision. It adds stable identities, source-span normalization, relation to indexed symbols, and promotion of search results into representation evidence. It must not implement a slower substitute for textual search.
+Tower should invoke `rg --json` and preserve its match precision. It adds stable identities, source-span normalization, query provenance, and promotion of search results into representation evidence. It must not implement a slower substitute for textual search or relabel matches as semantic relationships.
 
 ### 11.2 `fzf`
 
@@ -515,50 +518,55 @@ Tower should emit tab-delimited or JSON-derived candidate streams with stable ID
 Example target workflow:
 
 ```sh
-tower search 'handle_request' --format=fzf |
+tower search 'evidence' --format=fzf |
   fzf --preview 'tower evidence --preview {1}' |
-  tower map --stdin --viewpoint causal
+  tower map --stdin \
+    --evidence .tower/evidence.jsonl \
+    --question 'Where is inspectable evidence defined?' \
+    --intent locate-evidence \
+    --term evidence \
+    --viewpoint evidence \
+    --detail evidence \
+    --budget-units 7
 ```
 
 The exact CLI may change before Milestone 2 freezes it.
 
-### 11.3 Git and Jujutsu
+### 11.3 Git
 
-Define a `VcsAdapter` contract around concepts rather than command output formats. Git and Jujutsu adapters normalize revisions, changes, diffs, and history into the same evidence schema. Colocated repositories should prefer the user's detected working-copy system while retaining Git object identity when useful.
+Tower invokes Git read-only and normalizes revisions, status, changes, diffs, history, and line provenance into evidence records. The PoC does not add a VCS abstraction before a second implementation is actually needed.
 
 ### 11.4 Amp skill
 
 The skill evolves in three versions:
 
 1. **Observer:** instruct Amp to query Tower status, search, and evidence while solving a task normally.
-2. **Navigator:** allow Amp to compile, refine, reframe, and inspect representations.
+2. **Navigator:** allow Amp to compile, refine, project, and inspect representations.
 3. **Evaluator:** compare an Amp investigation with and without Tower using fixed tasks, recorded actions, answer rubrics, and bounded context usage.
 
 The skill must not tell Amp that Tower is helpful. It should explain the commands, decision rules, and limitations, then let evaluation determine usefulness.
 
-## 12. Neovim experimental corpus
+## 12. Tower experimental corpus
 
-Pin one Neovim commit before collecting baselines. Store the repository URL, commit, required build/generated-artifact instructions, and corpus hash in `experiments/neovim/corpus.toml`.
+Tower is its own initial corpus. Evaluation pins Tower revisions after executable backend slices exist so questions and expected answers remain reproducible while development continues.
 
-### Task A: localized contract
+### Task A: evidence lineage
 
-> Why does `nvim_buf_line_count()` behave differently for unloaded buffers, and which contract and tests would need review before changing it?
+> Where is the representation compiler contract defined, and which exact evidence supports each part of it?
 
-This tests contract lineage, state evidence, generated API metadata, and test discovery without requiring a large flow.
+This tests search evidence, normalized spans, provenance, and stale-evidence detection.
 
-### Task B: cross-cutting mechanism
+### Task B: bounded evidence trail
 
-> Why does an RPC request sometimes execute immediately while another request enters the editor through `K_EVENT`?
+> Which Tower files and revisions define how search evidence is collected and inspected?
 
-The expected representation must connect request decoding, handler metadata, fast/deferred admission, event queues, the editor state machine, execution-context restrictions, and tests.
+This tests whether question, focus, evidence/change viewpoints, detail, and a visible-unit budget produce a useful explanation from text matches and Git history without claiming unsupported program semantics.
 
-This is the primary design task because it is bounded but cannot be represented adequately by folders or an untyped call graph.
+### Task C: local representation change
 
-### Task C: distributed lifecycle
+> When one unit in an evidence view is refined or projected, what must remain stable and what new source or history evidence becomes visible?
 
-> When a built-in TUI disconnects, under which conditions does Neovim detach the UI, reconnect, or exit?
-
-This tests lifecycle branches, distributed ownership, deferred cleanup, client/server topology, and evidence spread across physical subsystems.
+This tests local rewrites, ports, focus continuity, omissions, and transformation history.
 
 ### Ground-truth package for each task
 
@@ -571,17 +579,17 @@ Before generating a representation, manually record:
 - Acceptable alternative explanations.
 - A scoring rubric for submitted answers.
 
-The generator must not read the answer rubric. The rubric is evaluation data only.
+The compiler must not read the answer rubric. The rubric is evaluation data only.
 
 ## 13. Evaluation design
 
 For each task, compare:
 
-1. Existing tools only: Neovim, `rg`, `fzf`, and Git/Jujutsu.
+1. Existing tools only: an editor, `rg`, `fzf`, and Git.
 2. Deterministic Tower.
 3. Deterministic Tower with Amp as a client.
 4. Tower with AI-proposed representations.
-5. Strategic-map visualization, when available.
+5. Native and strategic-map visualization, only when their entry conditions are met.
 
 Within the strategic-map condition, compare the full 3D perspective mode with its orthographic top-down mode. The third dimension must improve orientation, relationship comprehension, or retention rather than merely increase visual novelty.
 
@@ -598,7 +606,7 @@ Measure:
 - Human corrections required.
 - For Amp, context volume and tool calls where observable.
 
-Use the same pinned revision and avoid exposing ground-truth answers to the generator, skill, or participants.
+Use the same pinned Tower revision and avoid exposing ground-truth answers to the compiler, skill, or participants. Tower-specific answers must never be embedded in generic collectors or compilation rules.
 
 ## 14. Repository layout target
 
@@ -610,14 +618,13 @@ tower/                    small Python PoC package
   evidence.py             evidence collection and provenance
   representation.py       Representation IR and rewrite rules
 integrations/
-  nvim/                  Lua plugin, added in Milestone 4
-  amp-skill/             Amp skill, added in Milestone 5
+  amp-skill/             Amp skill, added in Milestone 6
 visualization/
-  prototype/             SwiftUI + Metal macOS experiment, Milestone 7
+  prototype/             Native macOS experiments, Milestones 7–8
 experiments/
   formats/
-  neovim/
-fixtures/                minimal extractor and representation corpora
+  tower/
+fixtures/                minimal evidence and representation corpora
 docs/
   decisions/             short experiment and decision records
 ```
@@ -630,9 +637,9 @@ The initial deliverable is a disposable proof of concept:
 
 1. A small local Python CLI.
 2. Inspectable JSON evidence and Representation IR artifacts.
-3. Text output sufficient to run and score the selected Neovim tasks.
+3. Text output sufficient to run and score the selected Tower-on-Tower tasks.
 4. Only the integrations needed to compare the PoC with the baseline workflow.
 
-This is not yet a product architecture. Neovim integration, an Amp skill, persistent storage, a service, packaging, and a strategic-map client are follow-up experiments. Each is added only when it answers a question that cannot be answered by the smaller CLI.
+This is not yet a product architecture. Editor integration, an Amp skill, persistent storage, a service, packaging, and graphical clients are follow-up experiments. Each is added only when it answers a question that cannot be answered by the smaller CLI.
 
-If the representation thesis is supported, the first visual product experiment uses the SwiftUI, MetalKit, Metal, and `libghostty-vt` stack described above and targets macOS only. Product discovery can still revise the storage model, protocol, and boundaries from measured needs. The eventual product may feel more like a strategy game than a conventional developer application, but the PoC must earn that investment first.
+If the representation thesis is supported, the first visual experiment is a SwiftUI inspector for unchanged Representation IR. Metal is introduced only for a later, bounded spatial hypothesis. Product discovery can still revise the storage model, protocol, and boundaries from measured needs. The eventual product may feel more like a strategy game than a conventional developer application, but the CLI and compiler formula must earn that investment first.
