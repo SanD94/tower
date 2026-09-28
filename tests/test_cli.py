@@ -398,6 +398,127 @@ class CliTest(unittest.TestCase):
         self.assertIn("Decision: omitted", output)
         self.assertIn("max-visible-units", output)
 
+    def test_views_lists_saved_question_frames_in_path_order(self) -> None:
+        snapshot = self.representation_fixture()
+        views_dir = self.repository.root / ".tower"
+        first = views_dir / "a.json"
+        result, _, error = self.invoke(
+            "compile",
+            *self.compile_arguments(snapshot, "compiler", budget=4),
+            "--output",
+            str(first),
+        )
+        self.assertEqual(0, result, error)
+
+        other_arguments = list(self.compile_arguments(snapshot, "client", budget=4))
+        other_arguments[
+            other_arguments.index("Where are compiler and client responsibilities?")
+        ] = "Where is the client rendered?"
+        second = views_dir / "b.json"
+        result, _, error = self.invoke(
+            "compile", *other_arguments, "--output", str(second)
+        )
+        self.assertEqual(0, result, error)
+        (views_dir / "noise.json").write_text('{"unrelated": true}\n', encoding="utf-8")
+
+        result, output, error = self.invoke(
+            "views", "--root", str(self.repository.root), "--json"
+        )
+        self.assertEqual(0, result, error)
+        payload = json.loads(output)
+        self.assertEqual(1, payload["schema_version"])
+        self.assertEqual(str(views_dir), payload["dir"])
+        self.assertEqual(1, payload["skipped"])
+        self.assertEqual(
+            [
+                {
+                    "intent": "locate-evidence",
+                    "terms": ["compiler"],
+                    "text": "Where are compiler and client responsibilities?",
+                },
+                {
+                    "intent": "locate-evidence",
+                    "terms": ["client"],
+                    "text": "Where is the client rendered?",
+                },
+            ],
+            payload["questions"],
+        )
+
+        result, output, error = self.invoke("views", "--root", str(self.repository.root))
+        self.assertEqual(0, result, error)
+        self.assertIn(
+            "Where are compiler and client responsibilities?\n"
+            "Where is the client rendered?",
+            output,
+        )
+        self.assertIn("Skipped 1 file(s) that are not saved views.", output)
+        self.assertLess(
+            output.index("Where are compiler and client responsibilities?"),
+            output.index("Where is the client rendered?"),
+        )
+
+    def test_views_keeps_question_across_transformations(self) -> None:
+        snapshot = self.representation_fixture()
+        views_dir = self.repository.root / ".tower"
+        original = views_dir / "bounded.json"
+        result, _, error = self.invoke(
+            "compile",
+            *self.compile_arguments(snapshot, budget=3),
+            "--output",
+            str(original),
+        )
+        self.assertEqual(0, result, error)
+        boundary = json.loads(original.read_text())["units"][0]["id"]
+        refined = views_dir / "refined.json"
+        result, _, error = self.invoke(
+            "refine",
+            boundary,
+            "--view",
+            str(original),
+            "--detail",
+            "evidence",
+            "--budget-units",
+            "3",
+            "--output",
+            str(refined),
+        )
+        self.assertEqual(0, result, error)
+
+        result, output, error = self.invoke(
+            "views", "--root", str(self.repository.root), "--json"
+        )
+        self.assertEqual(0, result, error)
+        payload = json.loads(output)
+        self.assertEqual(
+            [
+                {
+                    "intent": "locate-evidence",
+                    "terms": ["compiler", "client"],
+                    "text": "Where are compiler and client responsibilities?",
+                }
+            ]
+            * 2,
+            payload["questions"],
+        )
+
+    def test_views_reports_missing_or_empty_tower_directory(self) -> None:
+        self.repository.write("placeholder.txt")
+        self.repository.commit()
+        expected = self.repository.root / ".tower"
+
+        result, output, error = self.invoke(
+            "views", "--root", str(self.repository.root), "--json"
+        )
+        self.assertEqual(1, result)
+        self.assertIn(f"no tower build found: {expected} does not exist", error)
+        self.assertIn("tower index", error)
+
+        expected.mkdir()
+        result, output, error = self.invoke("views", "--root", str(self.repository.root))
+        self.assertEqual(0, result, error)
+        self.assertIn(f"No saved views found in {expected}", output)
+
     def test_unsupported_intent_produces_diagnostic_view(self) -> None:
         snapshot = self.representation_fixture()
         arguments = list(self.compile_arguments(snapshot, "compiler"))

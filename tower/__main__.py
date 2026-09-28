@@ -125,6 +125,51 @@ def render_status(workspace: Workspace) -> str:
     )
 
 
+VIEW_QUESTION_FILTER = (
+    'select(.schema == "tower-representation-ir" and .schema_version == 1)'
+    " | .frame.question"
+)
+
+
+def extract_view_question(path: Path) -> dict[str, object] | None:
+    """Extract the question of one saved view through jq."""
+    try:
+        result = subprocess.run(
+            ["jq", "-e", "-c", VIEW_QUESTION_FILTER, str(path)],
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+    except FileNotFoundError as error:
+        raise TowerError("required command not found: jq") from error
+
+    if result.returncode == 0:
+        return json.loads(result.stdout)
+    if result.returncode in (1, 4, 5):
+        # Valid JSON without a view frame (1, 4) or unreadable as JSON (5).
+        return None
+    detail = result.stderr.strip() or f"exit status {result.returncode}"
+    raise TowerError(f"jq failed: {detail}")
+
+
+def collect_view_questions(directory: Path) -> tuple[list[dict[str, object]], int]:
+    """Load the question of every saved view under directory, in path order."""
+    if not directory.is_dir():
+        raise TowerError(f"directory not found: {directory}")
+    questions: list[dict[str, object]] = []
+    skipped = 0
+    for path in sorted(directory.rglob("*.json")):
+        if not path.is_file():
+            continue
+        question = extract_view_question(path)
+        if question is None:
+            skipped += 1
+            continue
+        questions.append(question)
+    return questions, skipped
+
+
 def add_format_arguments(command: argparse.ArgumentParser, *, default: str) -> None:
     command.add_argument(
         "--format",
@@ -189,6 +234,13 @@ def parser() -> argparse.ArgumentParser:
     index.add_argument("--root", default=".", help="path inside a Git workspace")
     index.add_argument("--output", required=True, help="JSON Lines snapshot path")
     add_format_arguments(index, default="compact")
+
+    views = subparsers.add_parser(
+        "views",
+        help="list the questions recorded in saved Representation IR files under .tower",
+    )
+    views.add_argument("--root", default=".", help="path inside a Git workspace")
+    add_format_arguments(views, default="text")
 
     search = subparsers.add_parser("search")
     search.add_argument("query", help="regular expression passed to rg")
@@ -318,6 +370,37 @@ def main(argv: Sequence[str] | None = None) -> int:
                 )
             else:
                 print(f"Indexed {file_count} files and {span_count} spans: {output}")
+            return 0
+
+        if arguments.command == "views":
+            workspace = inspect_workspace(arguments.root)
+            directory = Path(workspace.root) / ".tower"
+            if not directory.is_dir():
+                raise TowerError(
+                    f"no tower build found: {directory} does not exist; "
+                    "run 'tower index' first"
+                )
+            questions, skipped = collect_view_questions(directory)
+            if arguments.format == "json":
+                print(
+                    json.dumps(
+                        {
+                            "schema_version": SCHEMA_VERSION,
+                            "dir": str(directory),
+                            "questions": questions,
+                            "skipped": skipped,
+                        },
+                        ensure_ascii=False,
+                        sort_keys=True,
+                    )
+                )
+                return 0
+            if questions:
+                print("\n".join(str(item["text"]) for item in questions))
+            else:
+                print(f"No saved views found in {directory}")
+            if skipped:
+                print(f"Skipped {skipped} file(s) that are not saved views.")
             return 0
 
         if arguments.command == "explain":

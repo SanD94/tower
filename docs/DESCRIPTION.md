@@ -493,7 +493,7 @@ Product-level performance targets should be set from observed PoC usage.
 ### Portability
 
 - The PoC supports the development environment first and avoids unnecessary platform-specific APIs.
-- Python 3, Git, and `rg` are required initially; `fzf`, editor integrations, and Amp are optional capabilities.
+- Python 3, Git, `rg`, and `jq` are required initially; `fzf`, editor integrations, and Amp are optional capabilities.
 - Paths and command invocation must support spaces and non-ASCII characters.
 - The native clients in Milestones 7–8 target macOS and are not portability requirements for the representation compiler or textual clients.
 

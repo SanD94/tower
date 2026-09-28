@@ -6,7 +6,7 @@ relationships.
 
 ## Quick start
 
-Requirements: Python 3.11+, Git, and [ripgrep](https://github.com/BurntSushi/ripgrep).
+Requirements: Python 3.11+, Git, [ripgrep](https://github.com/BurntSushi/ripgrep), and [jq](https://jqlang.github.io/jq/).
 
 Install the `tower` CLI into `~/.local/bin` (re-run after moving the repository):
 
@@ -36,7 +36,14 @@ tower map \
 ```
 
 Run `tower <command> --help` for command options; without installing, the same
-commands run as `python -m tower` from a checkout. Tower is a proof of
+commands run as `python -m tower` from a checkout. List the questions recorded
+in saved views:
+
+```sh
+tower views
+```
+
+Tower is a proof of
 concept; artifact formats may change. See [the description](docs/DESCRIPTION.md)
 for the model and [the milestones](docs/MILESTONE.md) for current scope.
 

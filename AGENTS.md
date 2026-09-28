@@ -25,13 +25,15 @@ python -m tower map --view .tower/view.json
 
 Use `evidence <id> --json` to resolve source claims and `explain <unit-id>` to
 inspect inclusion or omission decisions. Use `refine`, `trace`, `project`, and
-`collapse` to transform a saved view without recompiling it. Never infer calls,
+`collapse` to transform a saved view without recompiling it. Use
+`views --json` to list the questions recorded in saved views under `.tower`.
+Never infer calls,
 ownership, or causality from textual or historical proximity; Tower reports only
 the relationships supported by its collected evidence.
 
 ## Work on Tower
 
-- Require Python 3.11+, Git, and `rg`.
+- Require Python 3.11+, Git, `rg`, and `jq`.
 - Keep the PoC standard-library-only and its JSON artifacts inspectable.
 - Preserve provenance, explicit omissions, and deterministic output.
 - Run `python -m unittest discover -v` before submitting changes.
