@@ -1,0 +1,23 @@
+{
+  "connection_types": [
+    "changed-in",
+    "changed-with",
+    "line-attributed-to",
+    "matched-by"
+  ],
+  "file_labels": [
+    "docs/search.md",
+    "tests/test_search.py",
+    "tower/search.py"
+  ],
+  "inferred_connection_types": [
+    "changed-with"
+  ],
+  "omission_count": 0,
+  "unit_types": [
+    "commit",
+    "file",
+    "match",
+    "repository"
+  ]
+}

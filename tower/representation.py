@@ -13,7 +13,7 @@ from tower.evidence import search_snapshot
 
 REPRESENTATION_SCHEMA_VERSION = 1
 SUPPORTED_INTENT = "locate-evidence"
-SUPPORTED_VIEWPOINTS = ("topology", "evidence-list")
+SUPPORTED_VIEWPOINTS = ("topology", "evidence-list", "evidence", "change")
 SUPPORTED_DETAILS = ("summary", "evidence")
 
 
@@ -65,6 +65,8 @@ def source_label(record: dict[str, object], detail: str) -> str:
         return Path(str(workspace.get("root", "repository"))).name
     if record.get("type") == "file":
         return str(record["path"])
+    if record.get("type") == "commit":
+        return f"{str(record['oid'])[:12]} {record['subject']}"
     text = str(record.get("text", ""))
     return text if detail == "evidence" else text.lstrip("# ").strip()
 
@@ -87,7 +89,19 @@ def unit(
     if detail == "evidence":
         result["source"] = {
             key: record[key]
-            for key in ("path", "span", "text", "collector")
+            for key in (
+                "path",
+                "span",
+                "text",
+                "oid",
+                "parents",
+                "author",
+                "authored_at",
+                "subject",
+                "changed_files",
+                "diff",
+                "collector",
+            )
             if key in record
         }
     if provenance:
@@ -100,6 +114,8 @@ def connection(
     source: dict[str, object],
     target: dict[str, object],
     evidence: Sequence[str],
+    *,
+    status: str = "observed",
 ) -> dict[str, object]:
     return {
         "id": stable_id("connection", relationship, source["id"], target["id"]),
@@ -107,8 +123,24 @@ def connection(
         "source": source["id"],
         "target": target["id"],
         "evidence": list(dict.fromkeys(evidence)),
-        "status": "observed",
+        "status": status,
     }
+
+
+def matching_file(
+    records: Sequence[dict[str, object]], match: dict[str, object]
+) -> dict[str, object]:
+    file_record = next(
+        (
+            record
+            for record in records
+            if record.get("type") == "file" and record.get("path") == match["path"]
+        ),
+        None,
+    )
+    if file_record is None:
+        raise RepresentationError(f"file evidence not found for match: {match['path']}")
+    return file_record
 
 
 def file_for_record(
@@ -141,8 +173,6 @@ def compile_representation(
     detail: str,
     budget_units: int,
 ) -> dict[str, object]:
-    if viewpoint not in SUPPORTED_VIEWPOINTS:
-        raise RepresentationError(f"unsupported viewpoint: {viewpoint}")
     if detail not in SUPPORTED_DETAILS:
         raise RepresentationError(f"unsupported detail: {detail}")
     if budget_units < 1:
@@ -185,6 +215,17 @@ def compile_representation(
             {
                 "code": "unsupported-intent",
                 "message": f"intent is not supported by deterministic compilation: {intent}",
+            }
+        ]
+        return result
+    if viewpoint not in SUPPORTED_VIEWPOINTS:
+        result["diagnostics"] = [
+            {
+                "code": "unsupported-viewpoint",
+                "message": (
+                    "viewpoint is not supported by collected textual and historical "
+                    f"evidence: {viewpoint}"
+                ),
             }
         ]
         return result
@@ -266,13 +307,17 @@ def compile_representation(
                 "match",
                 match_record,
                 detail,
-                provenance={"matched_by": term, "match_span": match["span"]},
+                provenance={
+                    "matched_by": term,
+                    "match_span": match["span"],
+                    "collector": match["collector"],
+                },
             )
             candidates.append(match_unit)
             candidate_connections.append(
                 connection("contains", parent, match_unit, [str(match["id"])])
             )
-    else:
+    elif viewpoint == "evidence-list":
         for match, term in matches:
             match_record = record_by_id(records, str(match["id"]))
             if match_record is None:
@@ -281,21 +326,180 @@ def compile_representation(
                 "match",
                 match_record,
                 detail,
-                provenance={"matched_by": term, "match_span": match["span"]},
+                provenance={
+                    "matched_by": term,
+                    "match_span": match["span"],
+                    "collector": match["collector"],
+                },
             )
             candidates.append(match_unit)
             candidate_connections.append(
                 connection("matched-by", focus_unit, match_unit, [str(match["id"])])
             )
+    elif viewpoint == "evidence":
+        file_units: dict[str, dict[str, object]] = {}
+        for match, term in matches:
+            file_record = matching_file(records, match)
+            file_id = evidence_reference(file_record)
+            if file_id not in file_units:
+                file_units[file_id] = (
+                    focus_unit if file_id == focus_id else unit("file", file_record, detail)
+                )
+                if file_id != focus_id:
+                    candidates.append(file_units[file_id])
+                if focus_record.get("type") == "snapshot":
+                    candidate_connections.append(
+                        connection(
+                            "contains",
+                            focus_unit,
+                            file_units[file_id],
+                            [focus_id, file_id],
+                        )
+                    )
+            match_record = record_by_id(records, str(match["id"]))
+            if match_record is None:
+                raise RepresentationError(f"match evidence not found: {match['id']}")
+            match_unit = unit(
+                "match",
+                match_record,
+                detail,
+                provenance={
+                    "matched_by": term,
+                    "match_span": match["span"],
+                    "collector": match["collector"],
+                },
+            )
+            candidates.append(match_unit)
+            candidate_connections.append(
+                connection(
+                    "matched-by",
+                    file_units[file_id],
+                    match_unit,
+                    [str(match["id"])],
+                )
+            )
+    else:
+        commits = {
+            str(record["id"]): record
+            for record in records
+            if record.get("type") == "commit"
+        }
+        attributions = {
+            str(record["span_id"]): record
+            for record in records
+            if record.get("type") == "line-attribution"
+        }
+        file_units: dict[str, dict[str, object]] = {}
+        commit_units: dict[str, dict[str, object]] = {}
+        for match, term in matches:
+            file_record = matching_file(records, match)
+            file_id = evidence_reference(file_record)
+            if file_id not in file_units:
+                file_units[file_id] = (
+                    focus_unit if file_id == focus_id else unit("file", file_record, detail)
+                )
+                if file_id != focus_id:
+                    candidates.append(file_units[file_id])
+            match_record = record_by_id(records, str(match["id"]))
+            if match_record is None:
+                raise RepresentationError(f"match evidence not found: {match['id']}")
+            match_unit = unit(
+                "match",
+                match_record,
+                detail,
+                provenance={
+                    "matched_by": term,
+                    "match_span": match["span"],
+                    "collector": match["collector"],
+                },
+            )
+            candidates.append(match_unit)
+            candidate_connections.append(
+                connection("matched-by", file_units[file_id], match_unit, [str(match["id"])])
+            )
+            attribution = attributions.get(str(match["id"]))
+            if attribution is not None:
+                commit_record = commits.get(str(attribution["commit_id"]))
+                if commit_record is not None:
+                    commit_id = evidence_reference(commit_record)
+                    if commit_id not in commit_units:
+                        commit_units[commit_id] = unit("commit", commit_record, detail)
+                        candidates.append(commit_units[commit_id])
+                    candidate_connections.append(
+                        connection(
+                            "line-attributed-to",
+                            match_unit,
+                            commit_units[commit_id],
+                            [str(attribution["id"])],
+                        )
+                    )
+
+        matching_paths = {str(match["path"]) for match, _ in matches}
+        files_by_path = {
+            str(record["path"]): record
+            for record in records
+            if record.get("type") == "file"
+        }
+        for commit_id, commit_record in commits.items():
+            changed_paths = set(str(path) for path in commit_record["changed_files"])
+            relevant_paths = sorted(changed_paths & matching_paths)
+            if not relevant_paths:
+                continue
+            if commit_id not in commit_units:
+                commit_units[commit_id] = unit("commit", commit_record, detail)
+                candidates.append(commit_units[commit_id])
+            for path in relevant_paths:
+                file_record = files_by_path[path]
+                file_id = evidence_reference(file_record)
+                if file_id not in file_units:
+                    file_units[file_id] = unit("file", file_record, detail)
+                    candidates.append(file_units[file_id])
+                candidate_connections.append(
+                    connection(
+                        "changed-in",
+                        file_units[file_id],
+                        commit_units[commit_id],
+                        [commit_id],
+                    )
+                )
+                for companion_path in sorted(changed_paths - {path}):
+                    companion_record = files_by_path.get(companion_path)
+                    if companion_record is None:
+                        continue
+                    companion_id = evidence_reference(companion_record)
+                    if companion_id not in file_units:
+                        file_units[companion_id] = unit("file", companion_record, detail)
+                        candidates.append(file_units[companion_id])
+                    source_path, target_path = sorted((path, companion_path))
+                    source_id = evidence_reference(files_by_path[source_path])
+                    target_id = evidence_reference(files_by_path[target_path])
+                    candidate_connections.append(
+                        connection(
+                            "changed-with",
+                            file_units[source_id],
+                            file_units[target_id],
+                            [commit_id],
+                            status="historical-inference",
+                        )
+                    )
 
     visible = candidates[:budget_units]
     visible_ids = {candidate["id"] for candidate in visible}
     result["units"] = visible
-    result["connections"] = [
-        item
-        for item in candidate_connections
-        if item["source"] in visible_ids and item["target"] in visible_ids
-    ]
+    visible_connections: dict[str, dict[str, object]] = {}
+    for item in candidate_connections:
+        if item["source"] not in visible_ids or item["target"] not in visible_ids:
+            continue
+        identifier = str(item["id"])
+        if identifier in visible_connections:
+            visible_connections[identifier]["evidence"] = list(
+                dict.fromkeys(
+                    visible_connections[identifier]["evidence"] + item["evidence"]
+                )
+            )
+        else:
+            visible_connections[identifier] = item
+    result["connections"] = list(visible_connections.values())
     result["omissions"] = [
         {
             "unit": candidate["id"],
@@ -348,7 +552,10 @@ def render_representation(view: dict[str, object]) -> str:
     for item in view["units"]:
         lines.append(f"[{item['type']}] {item['id']}  {item['label']}")
     for item in view["connections"]:
-        lines.append(f"  {item['source']} --{item['type']}--> {item['target']}")
+        status = "" if item["status"] == "observed" else f" [{item['status']}]"
+        lines.append(
+            f"  {item['source']} --{item['type']}--> {item['target']}{status}"
+        )
     if view["omissions"]:
         lines.append(f"Omitted: {len(view['omissions'])} relevant units (max-visible-units)")
     for diagnostic in view["diagnostics"]:

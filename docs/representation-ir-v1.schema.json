@@ -36,7 +36,7 @@
           }
         },
         "focus": { "$ref": "#/$defs/id" },
-        "viewpoint": { "enum": ["topology", "evidence-list"] },
+        "viewpoint": { "type": "string" },
         "detail": { "enum": ["summary", "evidence"] },
         "budget": {
           "type": "object",
@@ -61,7 +61,7 @@
       "required": ["id", "type", "label", "evidence"],
       "properties": {
         "id": { "$ref": "#/$defs/id" },
-        "type": { "enum": ["repository", "file", "heading", "match", "span"] },
+        "type": { "enum": ["repository", "file", "heading", "match", "span", "commit"] },
         "label": { "type": "string" },
         "evidence": { "$ref": "#/$defs/evidence" },
         "source": { "type": "object" },
@@ -74,11 +74,11 @@
       "required": ["id", "type", "source", "target", "evidence", "status"],
       "properties": {
         "id": { "$ref": "#/$defs/id" },
-        "type": { "enum": ["contains", "matched-by"] },
+        "type": { "enum": ["contains", "matched-by", "changed-in", "line-attributed-to", "changed-with"] },
         "source": { "$ref": "#/$defs/id" },
         "target": { "$ref": "#/$defs/id" },
         "evidence": { "$ref": "#/$defs/evidence" },
-        "status": { "const": "observed" }
+        "status": { "enum": ["observed", "historical-inference"] }
       }
     },
     "omission": {

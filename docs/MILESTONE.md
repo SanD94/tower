@@ -34,28 +34,6 @@ Early milestones may implement a deliberately narrow value for an input, but no 
 
 ## Backend PoCs
 
-### Milestone 3: cross-file and historical evidence
-
-**Question:** Which Tower files and revisions define how search evidence is collected and inspected?
-
-**PoC:** compile a bounded evidence or change view from `rg` matches and Git history, then inspect every visible source span and commit.
-
-Implementation:
-
-- Collect question terms and exact occurrences with `rg --json`.
-- Collect revision, log, diff, changed files, and line provenance with read-only Git commands.
-- Introduce only relationships supported by those tools: containment, matched-by, changed-in, line-attributed-to, and changed-with.
-- Mark changed-with as historical inference and textual occurrence as a match, never as a call, dependency, or cause.
-- Add evidence and change viewpoints; unsupported causal or ownership viewpoints return diagnostics.
-- Add fixture tests and golden Representation IR tests before compiling Tower itself.
-
-Exit criteria:
-
-- The evidence and change views answer the milestone question using Tower's own files and history.
-- Every connection is either directly observed through `rg`/Git or visibly marked as historical inference.
-- No textual mention or co-change is presented as a semantic dependency or causal claim.
-- The result stays within budget and identifies evidence omitted by compression.
-
 ### Milestone 4: local transformations
 
 **Question:** Can one part of a Tower evidence view be expanded and restored without losing the surrounding explanation?

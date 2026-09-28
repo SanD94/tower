@@ -54,3 +54,34 @@ python -m tower compile \
 python -m tower map --view .tower/view.json
 python -m tower explain <unit-id> --view .tower/view.json
 ```
+
+## Cross-file and historical evidence — continue
+
+The evidence and change viewpoints answer which Tower files and revisions define
+search evidence by combining exact `rg` occurrences with inspectable Git commits,
+diffs, changed-file sets, and current-line attribution. Containment, matching,
+change, and attribution remain observed relationships; co-change alone is emitted
+as `changed-with` with `historical-inference` status. Unsupported causal and
+ownership viewpoints produce diagnostics instead of semantic guesses. A bounded
+Tower-on-Tower run retained the source and history context that fit and recorded
+the remaining relevant units as budget omissions. Continue to local
+transformations without adding syntax-aware analysis or upgrading textual and
+historical proximity into dependency claims.
+
+Repeat the experiment with:
+
+```sh
+python -m tower index --root . --output .tower/evidence.jsonl
+python -m tower compile \
+  --evidence .tower/evidence.jsonl \
+  --question "Which Tower files and revisions define how search evidence is collected and inspected?" \
+  --intent locate-evidence \
+  --term "search evidence" --term "rg --json" \
+  --focus . \
+  --viewpoint change \
+  --detail evidence \
+  --budget-units 25 \
+  --output .tower/change-view.json
+python -m tower map --view .tower/change-view.json
+python -m tower evidence <commit-id> --evidence .tower/evidence.jsonl
+```

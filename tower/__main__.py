@@ -152,7 +152,9 @@ def add_compiler_arguments(
     )
     command.add_argument("--focus", required=required, help="evidence path or stable ID")
     command.add_argument(
-        "--viewpoint", choices=SUPPORTED_VIEWPOINTS, required=required
+        "--viewpoint",
+        required=required,
+        help="representation viewpoint (supported: " + ", ".join(SUPPORTED_VIEWPOINTS) + ")",
     )
     command.add_argument("--detail", choices=SUPPORTED_DETAILS, required=required)
     command.add_argument("--budget-units", type=int, required=required)
@@ -230,6 +232,15 @@ def render_evidence(record: dict[str, object]) -> str:
     state = "stale" if record["stale"] else "fresh"
     if record["type"] == "file":
         return f"{record['id']}\t{record['path']}\t{state}\t{record['content_hash']}"
+    if record["type"] == "commit":
+        return f"{record['id']}\t{str(record['oid'])[:12]}\t{state}\t{record['subject']}"
+    if record["type"] == "revision":
+        return f"{record['id']}\t{record['oid']}\t{state}"
+    if record["type"] == "line-attribution":
+        return (
+            f"{record['id']}\t{record['path']}:{record['line']}\t{state}\t"
+            f"{record['commit_id']}"
+        )
     span = record["span"]
     start = span["start"]
     end = span["end"]

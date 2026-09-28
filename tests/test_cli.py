@@ -38,9 +38,9 @@ class Repository:
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_text(content, encoding="utf-8")
 
-    def commit(self) -> str:
+    def commit(self, message: str = "fixture") -> str:
         self.git("add", ".")
-        self.git("commit", "--quiet", "-m", "fixture")
+        self.git("commit", "--quiet", "-m", message)
         return self.git("rev-parse", "HEAD")
 
 
@@ -412,6 +412,190 @@ class CliTest(unittest.TestCase):
         view = json.loads(output.read_text())
         self.assertEqual([], view["units"])
         self.assertEqual("unsupported-intent", view["diagnostics"][0]["code"])
+
+    def historical_fixture(self) -> Path:
+        self.repository.write(
+            "tower/search.py", "def collect():\n    return 'search evidence'\n"
+        )
+        self.repository.write("docs/search.md", "Search evidence is inspected here.\n")
+        self.repository.commit("introduce search evidence")
+        self.repository.write(
+            "tower/search.py",
+            "def collect():\n    return 'rg --json search evidence'\n",
+        )
+        self.repository.write(
+            "tests/test_search.py", "def test_search():\n    assert 'rg --json'\n"
+        )
+        self.repository.commit("collect rg evidence with a test")
+        snapshot = self.repository.root / "history.jsonl"
+        result, _, error = self.invoke(
+            "index", "--root", str(self.repository.root), "--output", str(snapshot)
+        )
+        self.assertEqual(0, result, error)
+        return snapshot
+
+    def historical_arguments(
+        self, snapshot: Path, viewpoint: str, budget: int = 100
+    ) -> tuple[str, ...]:
+        return (
+            "--evidence",
+            str(snapshot),
+            "--question",
+            "Which files and revisions define search evidence?",
+            "--intent",
+            "locate-evidence",
+            "--term",
+            "search evidence",
+            "--term",
+            "rg --json",
+            "--focus",
+            ".",
+            "--viewpoint",
+            viewpoint,
+            "--detail",
+            "evidence",
+            "--budget-units",
+            str(budget),
+        )
+
+    def test_index_collects_inspectable_git_history_and_line_provenance(self) -> None:
+        snapshot = self.historical_fixture()
+        records = [json.loads(line) for line in snapshot.read_text().splitlines()]
+
+        self.assertEqual(1, sum(record["type"] == "revision" for record in records))
+        commits = [record for record in records if record["type"] == "commit"]
+        self.assertEqual(2, len(commits))
+        latest = next(
+            record
+            for record in commits
+            if record["subject"] == "collect rg evidence with a test"
+        )
+        self.assertEqual(
+            ["tests/test_search.py", "tower/search.py"], latest["changed_files"]
+        )
+        self.assertIn("+    return 'rg --json search evidence'", latest["diff"])
+        attribution = next(
+            record
+            for record in records
+            if record["type"] == "line-attribution"
+            and record["path"] == "tower/search.py"
+            and record["line"] == 2
+        )
+        self.assertEqual(latest["id"], attribution["commit_id"])
+
+        result, output, error = self.invoke(
+            "evidence", latest["id"], "--evidence", str(snapshot), "--json"
+        )
+        self.assertEqual(0, result, error)
+        self.assertEqual(latest["diff"], json.loads(output)["diff"])
+
+    def test_uncommitted_lines_are_not_attributed_to_the_base_revision(self) -> None:
+        self.repository.write("source.py", "stable\nold evidence\n")
+        self.repository.commit("base")
+        self.repository.write("source.py", "stable\nnew evidence\n")
+        snapshot = self.repository.root / "dirty.jsonl"
+
+        result, _, error = self.invoke(
+            "index", "--root", str(self.repository.root), "--output", str(snapshot)
+        )
+
+        self.assertEqual(0, result, error)
+        records = [json.loads(line) for line in snapshot.read_text().splitlines()]
+        self.assertTrue(records[0]["workspace"]["dirty"])
+        changed_span = next(
+            record for record in records if record.get("text") == "new evidence"
+        )
+        self.assertFalse(
+            any(
+                record.get("type") == "line-attribution"
+                and record.get("span_id") == changed_span["id"]
+                for record in records
+            )
+        )
+
+    def test_evidence_and_change_viewpoints_use_only_supported_relationships(self) -> None:
+        snapshot = self.historical_fixture()
+
+        views = {}
+        for viewpoint in ("evidence", "change"):
+            output = self.repository.root / f"{viewpoint}.json"
+            result, _, error = self.invoke(
+                "compile",
+                *self.historical_arguments(snapshot, viewpoint),
+                "--output",
+                str(output),
+            )
+            self.assertEqual(0, result, error)
+            views[viewpoint] = json.loads(output.read_text())
+
+        self.assertEqual(
+            {"contains", "matched-by"},
+            {connection["type"] for connection in views["evidence"]["connections"]},
+        )
+        change_relationships = {
+            connection["type"] for connection in views["change"]["connections"]
+        }
+        self.assertEqual(
+            {"matched-by", "changed-in", "line-attributed-to", "changed-with"},
+            change_relationships,
+        )
+        inferred = [
+            connection
+            for connection in views["change"]["connections"]
+            if connection["type"] == "changed-with"
+        ]
+        self.assertTrue(inferred)
+        self.assertTrue(
+            all(connection["status"] == "historical-inference" for connection in inferred)
+        )
+        self.assertTrue(
+            all(
+                connection["status"] == "observed"
+                for connection in views["change"]["connections"]
+                if connection["type"] != "changed-with"
+            )
+        )
+        result, output, error = self.invoke(
+            "map", "--view", str(self.repository.root / "change.json")
+        )
+        self.assertEqual(0, result, error)
+        self.assertIn("changed-with", output)
+        self.assertIn("[historical-inference]", output)
+
+        change = views["change"]
+        golden_projection = {
+            "unit_types": sorted({item["type"] for item in change["units"]}),
+            "file_labels": sorted(
+                item["label"] for item in change["units"] if item["type"] == "file"
+            ),
+            "connection_types": sorted(change_relationships),
+            "inferred_connection_types": sorted(
+                {
+                    item["type"]
+                    for item in change["connections"]
+                    if item["status"] == "historical-inference"
+                }
+            ),
+            "omission_count": len(change["omissions"]),
+        }
+        golden_path = Path(__file__).parent / "golden" / "milestone-3-change-view.json"
+        self.assertEqual(json.loads(golden_path.read_text()), golden_projection)
+
+    def test_unsupported_semantic_viewpoint_produces_diagnostic_view(self) -> None:
+        snapshot = self.historical_fixture()
+        output = self.repository.root / "unsupported.json"
+
+        result, _, error = self.invoke(
+            "compile",
+            *self.historical_arguments(snapshot, "causality"),
+            "--output",
+            str(output),
+        )
+
+        self.assertEqual(0, result, error)
+        view = json.loads(output.read_text())
+        self.assertEqual([], view["units"])
+        self.assertEqual("unsupported-viewpoint", view["diagnostics"][0]["code"])
 
 
 if __name__ == "__main__":

@@ -25,6 +25,7 @@ def run_rg(arguments: Sequence[str], *, cwd: Path) -> str:
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
+            errors="replace",
         )
     except FileNotFoundError as error:
         raise EvidenceError("required command not found: rg") from error
@@ -33,6 +34,27 @@ def run_rg(arguments: Sequence[str], *, cwd: Path) -> str:
         detail = result.stderr.strip() or f"exit status {result.returncode}"
         raise EvidenceError(f"rg failed: {detail}")
     return result.stdout
+
+
+def run_git(
+    arguments: Sequence[str], *, cwd: Path, allowed_statuses: tuple[int, ...] = (0,)
+) -> str | None:
+    try:
+        result = subprocess.run(
+            ["git", *arguments],
+            cwd=cwd,
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            errors="replace",
+        )
+    except FileNotFoundError as error:
+        raise EvidenceError("required command not found: git") from error
+    if result.returncode not in allowed_statuses:
+        detail = result.stderr.strip() or f"exit status {result.returncode}"
+        raise EvidenceError(f"git failed: {detail}")
+    return result.stdout if result.returncode == 0 else None
 
 
 def content_hash(content: bytes) -> str:
@@ -61,19 +83,167 @@ def indexed_lines(content: bytes) -> Iterable[tuple[int, bytes, bytes]]:
         yield number, text, line[len(text) :]
 
 
+def collect_git_evidence(
+    root: Path,
+    revision: str,
+    files: Sequence[dict[str, object]],
+    spans: Sequence[dict[str, object]],
+) -> list[dict[str, object]]:
+    records: list[dict[str, object]] = [
+        {
+            "type": "revision",
+            "id": evidence_id("revision", revision),
+            "oid": revision,
+            "collector": {
+                "name": "git",
+                "command": ["git", "rev-parse", "--verify", "HEAD"],
+            },
+        }
+    ]
+    history = run_git(["rev-list", "--topo-order", revision], cwd=root) or ""
+    for oid in history.splitlines():
+        metadata = run_git(
+            ["show", "-s", "--format=%H%x00%P%x00%an%x00%ae%x00%aI%x00%s", oid],
+            cwd=root,
+        )
+        if metadata is None:
+            continue
+        fields = metadata.rstrip("\n").split("\0")
+        changed_output = run_git(
+            ["diff-tree", "--root", "--no-commit-id", "--name-only", "-r", "-z", oid],
+            cwd=root,
+        ) or ""
+        changed_files = sorted(path for path in changed_output.split("\0") if path)
+        diff = run_git(
+            ["show", "--format=", "--no-ext-diff", "--unified=3", oid, "--"],
+            cwd=root,
+        )
+        records.append(
+            {
+                "type": "commit",
+                "id": evidence_id("commit", oid),
+                "oid": fields[0],
+                "parents": fields[1].split() if fields[1] else [],
+                "author": {"name": fields[2], "email": fields[3]},
+                "authored_at": fields[4],
+                "subject": fields[5],
+                "changed_files": changed_files,
+                "diff": diff or "",
+                "collector": {
+                    "name": "git",
+                    "commands": [
+                        [
+                            "git",
+                            "show",
+                            "-s",
+                            "--format=%H%x00%P%x00%an%x00%ae%x00%aI%x00%s",
+                            oid,
+                        ],
+                        [
+                            "git",
+                            "diff-tree",
+                            "--root",
+                            "--no-commit-id",
+                            "--name-only",
+                            "-r",
+                            "-z",
+                            oid,
+                        ],
+                        [
+                            "git",
+                            "show",
+                            "--format=",
+                            "--no-ext-diff",
+                            "--unified=3",
+                            oid,
+                            "--",
+                        ],
+                    ],
+                },
+            }
+        )
+
+    spans_by_path_and_line = {
+        (str(span["path"]), int(span["span"]["start"]["line"])): span
+        for span in spans
+    }
+    for file_record in files:
+        if file_record.get("encoding") != "utf-8":
+            continue
+        path = str(file_record["path"])
+        blame = run_git(
+            ["blame", "--line-porcelain", "--", path],
+            cwd=root,
+            allowed_statuses=(0, 128),
+        )
+        if blame is None:
+            continue
+        for line in blame.splitlines():
+            parts = line.split()
+            if not parts:
+                continue
+            oid = parts[0].lstrip("^")
+            if len(parts) < 4 or len(oid) != 40 or oid == "0" * 40:
+                continue
+            try:
+                final_line = int(parts[2])
+            except ValueError:
+                continue
+            span = spans_by_path_and_line.get((path, final_line))
+            if span is None:
+                continue
+            records.append(
+                {
+                    "type": "line-attribution",
+                    "id": evidence_id("attribution", span["id"], oid),
+                    "span_id": span["id"],
+                    "file_id": file_record["id"],
+                    "path": path,
+                    "line": final_line,
+                    "commit_id": evidence_id("commit", oid),
+                    "collector": {
+                        "name": "git",
+                        "command": [
+                            "git",
+                            "blame",
+                            "--line-porcelain",
+                            "--",
+                            path,
+                        ],
+                    },
+                }
+            )
+    return records
+
+
 def build_snapshot(root: Path, revision: str, output: Path) -> list[dict[str, object]]:
+    status_arguments = ["status", "--porcelain", "--untracked-files=normal", "--", "."]
+    try:
+        output_path = output.relative_to(root).as_posix()
+    except ValueError:
+        pass
+    else:
+        status_arguments.append(f":(exclude,top){output_path}")
+    dirty = bool((run_git(status_arguments, cwd=root) or "").strip())
     records: list[dict[str, object]] = [
         {
             "type": "snapshot",
             "id": evidence_id("snapshot", str(root), revision),
             "schema_version": SNAPSHOT_SCHEMA_VERSION,
-            "workspace": {"root": str(root), "revision": revision, "vcs": "git"},
+            "workspace": {
+                "root": str(root),
+                "revision": revision,
+                "dirty": dirty,
+                "vcs": "git",
+            },
             "collector": {
                 "name": "tower-index",
                 "file_discovery": ["rg", "--files", "--null"],
             },
         }
     ]
+    file_records: list[dict[str, object]] = []
+    span_records: list[dict[str, object]] = []
     for path in discover_files(root, output):
         content = (root / path).read_bytes()
         digest = content_hash(content)
@@ -84,36 +254,37 @@ def build_snapshot(root: Path, revision: str, output: Path) -> list[dict[str, ob
             encoding = "binary"
         else:
             encoding = "utf-8"
-        records.append(
-            {
-                "type": "file",
-                "id": file_id,
-                "path": path,
-                "content_hash": digest,
-                "size_bytes": len(content),
-                "encoding": encoding,
-                "collector": {"name": "rg", "command": ["rg", "--files", "--null"]},
-            }
-        )
+        file_record = {
+            "type": "file",
+            "id": file_id,
+            "path": path,
+            "content_hash": digest,
+            "size_bytes": len(content),
+            "encoding": encoding,
+            "collector": {"name": "rg", "command": ["rg", "--files", "--null"]},
+        }
+        records.append(file_record)
+        file_records.append(file_record)
         if encoding != "utf-8":
             continue
         for line_number, text_bytes, ending in indexed_lines(content):
             text = text_bytes.decode("utf-8")
-            records.append(
-                {
-                    "type": "span",
-                    "id": evidence_id("span", path, line_number, text),
-                    "file_id": file_id,
-                    "path": path,
-                    "span": {
-                        "start": {"line": line_number, "byte_column": 0},
-                        "end": {"line": line_number, "byte_column": len(text_bytes)},
-                    },
-                    "text": text,
-                    "line_ending": ending.decode("ascii"),
-                    "collector": {"name": "tower-index", "method": "utf-8-line-span"},
-                }
-            )
+            span_record = {
+                "type": "span",
+                "id": evidence_id("span", path, line_number, text),
+                "file_id": file_id,
+                "path": path,
+                "span": {
+                    "start": {"line": line_number, "byte_column": 0},
+                    "end": {"line": line_number, "byte_column": len(text_bytes)},
+                },
+                "text": text,
+                "line_ending": ending.decode("ascii"),
+                "collector": {"name": "tower-index", "method": "utf-8-line-span"},
+            }
+            records.append(span_record)
+            span_records.append(span_record)
+    records.extend(collect_git_evidence(root, revision, file_records, span_records))
     return records
 
 
