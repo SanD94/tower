@@ -4,7 +4,7 @@ Tower is an experimental representation compiler for codebases. It turns exact
 `rg` and Git evidence into bounded, inspectable views without inventing semantic
 relationships.
 
-## Human quick start
+## Quick start
 
 Requirements: Python 3.11+, Git, and [ripgrep](https://github.com/BurntSushi/ripgrep).
 
