@@ -8,6 +8,15 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Sequence
 
+from tower.evidence import (
+    EvidenceError,
+    build_snapshot,
+    load_snapshot,
+    resolve_evidence,
+    search_snapshot,
+    write_snapshot,
+)
+
 
 SCHEMA_VERSION = 1
 
@@ -102,6 +111,22 @@ def render_status(workspace: Workspace) -> str:
     )
 
 
+def add_format_arguments(command: argparse.ArgumentParser, *, default: str) -> None:
+    command.add_argument(
+        "--format",
+        choices=("compact", "json"),
+        default=default,
+        help=f"output format (default: {default})",
+    )
+    command.add_argument(
+        "--json",
+        action="store_const",
+        const="json",
+        dest="format",
+        help="shorthand for --format json",
+    )
+
+
 def parser() -> argparse.ArgumentParser:
     cli = argparse.ArgumentParser(prog="tower")
     subparsers = cli.add_subparsers(dest="command", required=True)
@@ -122,26 +147,126 @@ def parser() -> argparse.ArgumentParser:
             dest="format",
             help="shorthand for --format json",
         )
+
+    index = subparsers.add_parser("index")
+    index.add_argument("--root", default=".", help="path inside a Git workspace")
+    index.add_argument("--output", required=True, help="JSON Lines snapshot path")
+    add_format_arguments(index, default="compact")
+
+    search = subparsers.add_parser("search")
+    search.add_argument("query", help="regular expression passed to rg")
+    search.add_argument("--evidence", required=True, help="JSON Lines snapshot path")
+    add_format_arguments(search, default="compact")
+
+    evidence = subparsers.add_parser("evidence")
+    evidence.add_argument("id", help="file or source-span evidence ID")
+    evidence.add_argument("--evidence", required=True, help="JSON Lines snapshot path")
+    add_format_arguments(evidence, default="compact")
     return cli
+
+
+def evidence_path(value: str) -> Path:
+    return Path(value).expanduser().resolve()
+
+
+def render_search_result(result: dict[str, object]) -> str:
+    span = result["span"]
+    start = span["start"]
+    end = span["end"]
+    state = "stale" if result["stale"] else "fresh"
+    location = (
+        f"{result['path']}:{start['line']}:{start['byte_column']}-{end['byte_column']}"
+    )
+    return f"{result['id']}\t{location}\t{state}\t{result['text']}"
+
+
+def render_evidence(record: dict[str, object]) -> str:
+    state = "stale" if record["stale"] else "fresh"
+    if record["type"] == "file":
+        return f"{record['id']}\t{record['path']}\t{state}\t{record['content_hash']}"
+    span = record["span"]
+    start = span["start"]
+    end = span["end"]
+    location = (
+        f"{record['path']}:{start['line']}:{start['byte_column']}-{end['byte_column']}"
+    )
+    return f"{record['id']}\t{location}\t{state}\t{record['text']}"
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     arguments = parser().parse_args(argv)
     try:
-        workspace = inspect_workspace(arguments.root)
-        files = searchable_files(workspace) if arguments.command == "files" else None
-    except TowerError as error:
+        if arguments.command in ("status", "files"):
+            workspace = inspect_workspace(arguments.root)
+            files = searchable_files(workspace) if arguments.command == "files" else None
+            if arguments.format == "json":
+                payload = document(
+                    workspace, **({"files": files} if files is not None else {})
+                )
+                print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+            elif files is not None:
+                print("\n".join(files))
+            else:
+                print(render_status(workspace))
+            return 0
+
+        if arguments.command == "index":
+            workspace = inspect_workspace(arguments.root)
+            output = Path(arguments.output).expanduser()
+            if not output.is_absolute():
+                output = Path(workspace.root) / output
+            output = output.resolve()
+            records = build_snapshot(Path(workspace.root), workspace.revision, output)
+            write_snapshot(records, output)
+            file_count = sum(record["type"] == "file" for record in records)
+            span_count = sum(record["type"] == "span" for record in records)
+            if arguments.format == "json":
+                print(
+                    json.dumps(
+                        {
+                            "schema_version": SCHEMA_VERSION,
+                            "output": str(output),
+                            "files": file_count,
+                            "spans": span_count,
+                        },
+                        ensure_ascii=False,
+                        sort_keys=True,
+                    )
+                )
+            else:
+                print(f"Indexed {file_count} files and {span_count} spans: {output}")
+            return 0
+
+        snapshot = evidence_path(arguments.evidence)
+        records = load_snapshot(snapshot)
+        if arguments.command == "search":
+            results = search_snapshot(records, arguments.query)
+            if arguments.format == "json":
+                print(
+                    json.dumps(
+                        {
+                            "schema_version": SCHEMA_VERSION,
+                            "evidence": str(snapshot),
+                            "query": arguments.query,
+                            "results": results,
+                        },
+                        ensure_ascii=False,
+                        sort_keys=True,
+                    )
+                )
+            else:
+                print("\n".join(render_search_result(result) for result in results))
+            return 0
+
+        record = resolve_evidence(records, arguments.id)
+        if arguments.format == "json":
+            print(json.dumps(record, ensure_ascii=False, sort_keys=True))
+        else:
+            print(render_evidence(record))
+        return 0
+    except (EvidenceError, TowerError, OSError) as error:
         print(f"tower: {error}", file=sys.stderr)
         return 1
-
-    if arguments.format == "json":
-        payload = document(workspace, **({"files": files} if files is not None else {}))
-        print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
-    elif files is not None:
-        print("\n".join(files))
-    else:
-        print(render_status(workspace))
-    return 0
 
 
 if __name__ == "__main__":

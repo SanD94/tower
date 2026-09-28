@@ -115,6 +115,120 @@ class CliTest(unittest.TestCase):
         self.assertIn(f"Revision: {revision}", output)
         self.assertIn("Working copy: clean", output)
 
+    def test_index_is_deterministic_and_records_normalized_spans(self) -> None:
+        self.repository.write("notes/contract.txt", "first\nβeta contract\n")
+        revision = self.repository.commit()
+        snapshot = self.repository.root / "evidence.jsonl"
+
+        result, output, error = self.invoke(
+            "index",
+            "--root",
+            str(self.repository.root / "notes"),
+            "--output",
+            str(snapshot),
+            "--json",
+        )
+
+        self.assertEqual(0, result, error)
+        header = json.loads(snapshot.read_text().splitlines()[0])
+        self.assertEqual(revision, header["workspace"]["revision"])
+        first_snapshot = snapshot.read_bytes()
+        records = [json.loads(line) for line in snapshot.read_text().splitlines()]
+        span = next(
+            record for record in records if record.get("text") == "βeta contract"
+        )
+        self.assertEqual(
+            {
+                "start": {"line": 2, "byte_column": 0},
+                "end": {"line": 2, "byte_column": 14},
+            },
+            span["span"],
+        )
+        self.assertEqual("tower-index", span["collector"]["name"])
+
+        result, _, error = self.invoke(
+            "index",
+            "--root",
+            str(self.repository.root),
+            "--output",
+            str(snapshot),
+        )
+
+        self.assertEqual(0, result, error)
+        self.assertEqual(first_snapshot, snapshot.read_bytes())
+
+    def test_search_returns_exact_rg_match_and_resolvable_evidence(self) -> None:
+        self.repository.write(
+            "docs/contract.txt", "βeta View = compile(Evidence)\nseparate evidence\n"
+        )
+        self.repository.commit()
+        snapshot = self.repository.root / "evidence.jsonl"
+        self.invoke(
+            "index", "--root", str(self.repository.root), "--output", str(snapshot)
+        )
+
+        result, output, error = self.invoke(
+            "search", "View = compile", "--evidence", str(snapshot), "--json"
+        )
+
+        self.assertEqual(0, result, error)
+        matches = json.loads(output)["results"]
+        self.assertEqual(1, len(matches))
+        match = matches[0]
+        self.assertEqual("docs/contract.txt", match["path"])
+        self.assertEqual(
+            {
+                "start": {"line": 1, "byte_column": 6},
+                "end": {"line": 1, "byte_column": 20},
+            },
+            match["span"],
+        )
+        self.assertEqual("rg", match["collector"]["name"])
+        self.assertFalse(match["stale"])
+
+        result, output, error = self.invoke(
+            "evidence", match["id"], "--evidence", str(snapshot), "--json"
+        )
+
+        self.assertEqual(0, result, error)
+        evidence = json.loads(output)
+        self.assertEqual("βeta View = compile(Evidence)", evidence["text"])
+        self.assertFalse(evidence["stale"])
+
+    def test_edit_marks_only_that_files_snapshot_evidence_stale(self) -> None:
+        self.repository.write("changed.txt", "snapshot needle\n")
+        self.repository.write("unchanged.txt", "stable needle\n")
+        self.repository.commit()
+        snapshot = self.repository.root / "evidence.jsonl"
+        self.invoke(
+            "index", "--root", str(self.repository.root), "--output", str(snapshot)
+        )
+        _, output, _ = self.invoke(
+            "search", "needle", "--evidence", str(snapshot), "--json"
+        )
+        identifiers = {
+            result["path"]: result["id"] for result in json.loads(output)["results"]
+        }
+
+        self.repository.write("changed.txt", "replacement\n")
+
+        states = {}
+        for path, identifier in identifiers.items():
+            result, output, error = self.invoke(
+                "evidence", identifier, "--evidence", str(snapshot), "--json"
+            )
+            self.assertEqual(0, result, error)
+            states[path] = json.loads(output)["stale"]
+        self.assertEqual({"changed.txt": True, "unchanged.txt": False}, states)
+
+        result, output, error = self.invoke(
+            "search", "snapshot needle", "--evidence", str(snapshot), "--json"
+        )
+        self.assertEqual(0, result, error)
+        stale_match = json.loads(output)["results"][0]
+        self.assertEqual("snapshot needle", stale_match["text"])
+        self.assertTrue(stale_match["stale"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -34,33 +34,6 @@ Early milestones may implement a deliberately narrow value for an input, but no 
 
 ## Backend PoCs
 
-### Milestone 1: inspectable evidence
-
-**Question:** Where is Tower's compiler contract defined, and what exact source supports the answer?
-
-**PoC:**
-
-```sh
-python -m tower index --root . --output .tower/evidence.jsonl
-python -m tower search "View = compile" --evidence .tower/evidence.jsonl
-python -m tower evidence <id> --evidence .tower/evidence.jsonl
-```
-
-Implementation:
-
-- Index files, content hashes, and normalized source spans into an atomic JSON Lines snapshot.
-- Wrap `rg --json` rather than replacing textual search.
-- Assign reproducible IDs within a workspace snapshot.
-- Implement `index`, `search`, and `evidence`, including compact and JSON output.
-- Report stale spans when current content no longer matches the snapshot.
-
-Exit criteria:
-
-- Every result resolves to an exact span and collector provenance.
-- Repeating an unchanged index produces equivalent deterministic evidence.
-- Editing one Tower file invalidates that file without invalidating unrelated evidence.
-- This milestone is useful as an evidence-aware search tool even though it does not yet compile representations.
-
 ### Milestone 2: first end-to-end representation compiler
 
 **Question:** Where are Tower's compiler and client responsibilities described, and how are those matches contained in the repository?
