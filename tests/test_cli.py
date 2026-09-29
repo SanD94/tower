@@ -8,7 +8,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from tower.__main__ import main
+from tower.cli import main
 
 
 class Repository:
