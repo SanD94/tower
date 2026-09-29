@@ -869,13 +869,21 @@ def load_representation(path: Path) -> dict[str, object]:
     return view
 
 
-def render_representation(view: dict[str, object]) -> str:
+def render_representation(
+    view: dict[str, object], *, stale: bool | None = False
+) -> str:
     frame = view["frame"]
     lines = [
         f"Question: {frame['question']['text']}",
         f"Focus: {view['subject']}",
         f"Viewpoint: {frame['viewpoint']} | Detail: {frame['detail']} | Units: {len(view['units'])}/{frame['budget']['max_visible_units']}",
     ]
+    if stale is True:
+        lines.append(
+            "Freshness: stale; re-index and answer the question again before using this view as current"
+        )
+    elif stale is None:
+        lines.append("Freshness: unknown; the recorded workspace cannot be checked")
     for item in view["units"]:
         lines.append(f"[{item['type']}] {item['id']}  {item['label']}")
     for item in view["connections"]:

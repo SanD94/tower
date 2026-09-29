@@ -389,19 +389,82 @@ def snapshot_root(records: Sequence[dict[str, object]]) -> Path:
     return Path(workspace["root"])
 
 
-def load_live_snapshot(path: Path) -> list[dict[str, object]]:
-    try:
-        records = load_snapshot(path)
-    except EvidenceError as error:
-        if "unsupported evidence schema" not in str(error):
-            raise
-        records = _read_snapshot(path)
+def stale_worktree_paths(root: Path, files: object) -> list[str]:
+    if not isinstance(files, list):
+        return []
+    stale: list[str] = []
+    for item in files:
+        if not isinstance(item, dict):
+            continue
+        path = item.get("path")
+        blob_oid = item.get("blob_oid")
+        if not isinstance(path, str) or not isinstance(blob_oid, str):
+            continue
+        try:
+            current_oid = git_blob_oid(root, (root / path).read_bytes())
+        except OSError:
+            current_oid = None
+        if current_oid != blob_oid:
+            stale.append(path)
+    return stale
+
+
+def stale_file_ids(records: Sequence[dict[str, object]]) -> set[str]:
     root = snapshot_root(records)
-    revision = (run_git(["rev-parse", "--verify", "HEAD"], cwd=root) or "").strip()
-    current = build_snapshot(root, revision, path)
-    if current != records:
-        write_snapshot(current, path)
-    return current
+    stale_paths = set(
+        stale_worktree_paths(root, records[0].get("worktree", {}).get("files", []))
+    )
+    return {
+        str(record["id"])
+        for record in records
+        if record.get("type") == "file" and record.get("path") in stale_paths
+    }
+
+
+def snapshot_is_stale(records: Sequence[dict[str, object]]) -> bool:
+    root = snapshot_root(records)
+    workspace = records[0].get("workspace", {})
+    recorded_revision = workspace.get("revision") if isinstance(workspace, dict) else None
+    current_revision = (run_git(["rev-parse", "--verify", "HEAD"], cwd=root) or "").strip()
+    return current_revision != recorded_revision or bool(stale_file_ids(records))
+
+
+def frame_is_stale(frame: object) -> bool | None:
+    if not isinstance(frame, dict):
+        return None
+    workspace = frame.get("workspace")
+    worktree = frame.get("worktree")
+    if not isinstance(workspace, dict) or not isinstance(worktree, dict):
+        return None
+    root_value = workspace.get("root")
+    revision = workspace.get("revision")
+    if not isinstance(root_value, str) or not isinstance(revision, str):
+        return None
+    root = Path(root_value)
+    if not root.is_dir():
+        return None
+    current_revision = (run_git(["rev-parse", "--verify", "HEAD"], cwd=root) or "").strip()
+    return current_revision != revision or bool(
+        stale_worktree_paths(root, worktree.get("files"))
+    )
+
+
+def reconstruct_snapshot(records: Sequence[dict[str, object]], destination: Path) -> None:
+    spans_by_file: dict[str, list[dict[str, object]]] = {}
+    for record in records:
+        if record.get("type") == "span":
+            spans_by_file.setdefault(str(record["file_id"]), []).append(record)
+    for record in records:
+        if record.get("type") != "file" or record.get("encoding") != "utf-8":
+            continue
+        target = destination / str(record["path"])
+        target.parent.mkdir(parents=True, exist_ok=True)
+        spans = spans_by_file.get(str(record["id"]), [])
+        content = "".join(
+            str(span["text"]) + str(span["line_ending"])
+            for span in sorted(spans, key=lambda item: item["span"]["start"]["line"])
+        )
+        target.write_text(content, encoding="utf-8", newline="")
 
 
 def search_snapshot(
@@ -412,50 +475,46 @@ def search_snapshot(
         for record in records
         if record.get("type") == "span"
     }
+    stale = stale_file_ids(records)
     results: list[dict[str, object]] = []
-    root = snapshot_root(records)
-    files = [
-        str(record["path"])
-        for record in records
-        if record.get("type") == "file" and record.get("encoding") == "utf-8"
-    ]
-    if not files:
-        return results
-    output = run_rg(["--json", "--", query, *files], cwd=root)
-    for line in output.splitlines():
-        event = json.loads(line)
-        if event.get("type") != "match":
-            continue
-        data = event["data"]
-        path = str(data["path"]["text"])
-        if path.startswith("./"):
-            path = path[2:]
-        line_number = int(data["line_number"])
-        span_record = spans[(path, line_number)]
-        for match in data["submatches"]:
-            results.append(
-                {
-                    "id": span_record["id"],
-                    "path": path,
-                    "span": {
-                        "start": {
-                            "line": line_number,
-                            "byte_column": int(match["start"]),
+    with tempfile.TemporaryDirectory(prefix="tower evidence search ") as directory:
+        search_root = Path(directory)
+        reconstruct_snapshot(records, search_root)
+        output = run_rg(["--json", "--", query, "."], cwd=search_root)
+        for line in output.splitlines():
+            event = json.loads(line)
+            if event.get("type") != "match":
+                continue
+            data = event["data"]
+            path = str(data["path"]["text"])
+            if path.startswith("./"):
+                path = path[2:]
+            line_number = int(data["line_number"])
+            span_record = spans[(path, line_number)]
+            for match in data["submatches"]:
+                results.append(
+                    {
+                        "id": span_record["id"],
+                        "path": path,
+                        "span": {
+                            "start": {
+                                "line": line_number,
+                                "byte_column": int(match["start"]),
+                            },
+                            "end": {
+                                "line": line_number,
+                                "byte_column": int(match["end"]),
+                            },
                         },
-                        "end": {
-                            "line": line_number,
-                            "byte_column": int(match["end"]),
+                        "text": span_record["text"],
+                        "stale": span_record["file_id"] in stale,
+                        "collector": {
+                            "name": "rg",
+                            "command": ["rg", "--json", "--", query, "."],
+                            "query": query,
                         },
-                    },
-                    "text": span_record["text"],
-                    "stale": False,
-                    "collector": {
-                        "name": "rg",
-                        "command": ["rg", "--json", "--", query, *files],
-                        "query": query,
-                    },
-                }
-            )
+                    }
+                )
     return results
 
 
@@ -466,5 +525,7 @@ def resolve_evidence(
     if record is None:
         raise EvidenceError(f"evidence not found: {identifier}")
     result = dict(record)
-    result["stale"] = False
+    stale = stale_file_ids(records)
+    file_id = identifier if record.get("type") == "file" else record.get("file_id")
+    result["stale"] = file_id in stale
     return result

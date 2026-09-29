@@ -13,9 +13,9 @@ inspectable-evidence slice without adding another VCS backend.
 The `index`, `search`, and `evidence` commands answer where Tower's compiler
 contract is defined and expose the exact normalized source span and collector
 provenance behind each result. Re-indexing an unchanged workspace produces the
-same JSON Lines evidence. The original experiment marked edited evidence stale;
-the later live-workspace decision below replaces that behavior. The experiment
-supports continuing to the first representation
+same JSON Lines evidence. Edited or deleted source marks only the affected
+recorded evidence stale instead of deleting the evidence that supported an
+earlier answer. The experiment supports continuing to the first representation
 compiler without adding a database or replacing `rg`.
 
 Repeat the experiment with:
@@ -26,18 +26,19 @@ python -m tower search 'View = compile' --evidence .tower/evidence.jsonl
 python -m tower evidence <id> --evidence .tower/evidence.jsonl
 ```
 
-## Git-authoritative live workspace — continue
+## Git-authoritative evidence identity — revise
 
 Git now owns revision, file-set, ignore, and byte-content identity. Tower uses
 `git ls-files --cached --others --exclude-standard` for discovery and
 `git hash-object` blob OIDs for tracked, modified, and untracked files. The JSON
-Lines index is a refreshable cache: each live search, evidence lookup, or
-compilation follows the current `HEAD` and worktree instead of reconstructing and
-serving old source. Tower IDs remain contextual for file occurrences, spans,
-units, connections, and omissions, so equal blobs at different paths do not
-collapse. Saved Representation IR remains immutable and records its source
-revision and worktree identities. Continue without a database, daemon, or
-Tower-owned branch state.
+Lines index is recorded evidence, replaced only by an explicit `index` command.
+Search and inspection preserve old evidence and compare its blob identities with
+the worktree; compilation refuses stale input so a changed question must be
+answered from newly indexed evidence. Tower IDs remain contextual for file
+occurrences, spans, units, connections, and omissions, so equal blobs at
+different paths do not collapse. Saved Representation IR remains immutable,
+records its source revision and worktree identities, and reports when that frame
+is stale. Continue without a database, daemon, or Tower-owned branch state.
 
 ## First end-to-end representation compiler — continue
 

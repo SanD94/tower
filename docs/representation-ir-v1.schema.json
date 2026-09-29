@@ -23,9 +23,36 @@
     "frame": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["evidence", "question", "focus", "viewpoint", "detail", "budget", "assumptions"],
+      "required": ["evidence", "workspace", "worktree", "question", "focus", "viewpoint", "detail", "budget", "assumptions"],
       "properties": {
         "evidence": { "$ref": "#/$defs/id" },
+        "workspace": {
+          "type": "object",
+          "required": ["root", "revision", "dirty", "vcs"],
+          "properties": {
+            "root": { "type": "string" },
+            "revision": { "type": "string" },
+            "dirty": { "type": "boolean" },
+            "vcs": { "const": "git" }
+          }
+        },
+        "worktree": {
+          "type": "object",
+          "required": ["files"],
+          "properties": {
+            "files": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["path", "blob_oid"],
+                "properties": {
+                  "path": { "type": "string" },
+                  "blob_oid": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
         "question": {
           "type": "object",
           "additionalProperties": false,

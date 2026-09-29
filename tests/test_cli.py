@@ -195,7 +195,7 @@ class CliTest(unittest.TestCase):
         self.assertEqual("βeta View = compile(Evidence)", evidence["text"])
         self.assertFalse(evidence["stale"])
 
-    def test_cache_refreshes_after_a_worktree_edit(self) -> None:
+    def test_worktree_edit_preserves_and_marks_recorded_evidence_stale(self) -> None:
         self.repository.write("changed.txt", "snapshot needle\n")
         self.repository.write("unchanged.txt", "stable needle\n")
         self.repository.commit()
@@ -203,10 +203,11 @@ class CliTest(unittest.TestCase):
         self.invoke(
             "index", "--root", str(self.repository.root), "--output", str(snapshot)
         )
+        recorded_snapshot = snapshot.read_bytes()
         _, output, _ = self.invoke(
             "search", "needle", "--evidence", str(snapshot), "--json"
         )
-        old_identifiers = {
+        identifiers = {
             result["path"]: result["id"] for result in json.loads(output)["results"]
         }
 
@@ -219,11 +220,23 @@ class CliTest(unittest.TestCase):
         matches = {
             result["path"]: result for result in json.loads(output)["results"]
         }
-        self.assertEqual("current needle", matches["changed.txt"]["text"])
-        self.assertFalse(matches["changed.txt"]["stale"])
-        self.assertNotEqual(old_identifiers["changed.txt"], matches["changed.txt"]["id"])
-        self.assertEqual(old_identifiers["unchanged.txt"], matches["unchanged.txt"]["id"])
-        self.assertNotIn("snapshot needle", output)
+        self.assertEqual("snapshot needle", matches["changed.txt"]["text"])
+        self.assertTrue(matches["changed.txt"]["stale"])
+        self.assertFalse(matches["unchanged.txt"]["stale"])
+        self.assertEqual(identifiers["changed.txt"], matches["changed.txt"]["id"])
+        self.assertEqual(identifiers["unchanged.txt"], matches["unchanged.txt"]["id"])
+        self.assertNotIn("current needle", output)
+        self.assertEqual(recorded_snapshot, snapshot.read_bytes())
+
+        result, output, error = self.invoke(
+            "evidence",
+            identifiers["changed.txt"],
+            "--evidence",
+            str(snapshot),
+            "--json",
+        )
+        self.assertEqual(0, result, error)
+        self.assertTrue(json.loads(output)["stale"])
 
         records = [json.loads(line) for line in snapshot.read_text().splitlines()]
         changed_file = next(
@@ -231,7 +244,7 @@ class CliTest(unittest.TestCase):
             for record in records
             if record.get("type") == "file" and record.get("path") == "changed.txt"
         )
-        self.assertEqual(
+        self.assertNotEqual(
             self.repository.git("hash-object", "changed.txt"), changed_file["blob_oid"]
         )
 
@@ -264,7 +277,7 @@ class CliTest(unittest.TestCase):
         self.assertEqual(files["same-a.txt"]["blob_oid"], files["same-b.txt"]["blob_oid"])
         self.assertNotEqual(files["same-a.txt"]["id"], files["same-b.txt"]["id"])
 
-    def test_checkout_and_detached_head_refresh_the_cache(self) -> None:
+    def test_checkout_marks_recorded_branch_evidence_stale(self) -> None:
         self.repository.write("branch.txt", "main branch term\n")
         main_revision = self.repository.commit("main content")
         self.repository.git("checkout", "--quiet", "-b", "other")
@@ -281,11 +294,12 @@ class CliTest(unittest.TestCase):
         )
 
         self.assertEqual(0, result, error)
-        self.assertIn("main branch term", output)
-        self.assertNotIn("other branch term", output)
+        self.assertNotIn("main branch term", output)
+        self.assertIn("other branch term", output)
+        self.assertTrue(json.loads(output)["results"][0]["stale"])
         header = json.loads(snapshot.read_text().splitlines()[0])
-        self.assertEqual(main_revision, header["workspace"]["revision"])
-        self.assertNotEqual(other_revision, header["workspace"]["revision"])
+        self.assertEqual(other_revision, header["workspace"]["revision"])
+        self.assertNotEqual(main_revision, header["workspace"]["revision"])
 
     def representation_fixture(self) -> Path:
         self.repository.write(
@@ -464,6 +478,24 @@ class CliTest(unittest.TestCase):
         self.assertIn("Decision: omitted", output)
         self.assertIn("max-visible-units", output)
 
+        self.repository.write(
+            "docs/design.md", "# Tower\nThe previous evidence no longer applies.\n"
+        )
+        result, output, error = self.invoke("map", "--view", str(view_path))
+        self.assertEqual(0, result, error)
+        self.assertIn("Freshness: stale", output)
+        self.assertIn("answer the question again", output)
+
+        result, _, error = self.invoke(
+            "compile",
+            *self.compile_arguments(snapshot, budget=3),
+            "--output",
+            str(self.repository.root / "replacement.json"),
+        )
+        self.assertEqual(1, result)
+        self.assertIn("evidence snapshot is stale", error)
+        self.assertIn("answer the question again", error)
+
     def test_views_lists_saved_question_frames_in_path_order(self) -> None:
         snapshot = self.representation_fixture()
         views_dir = self.repository.root / ".tower"
@@ -499,11 +531,13 @@ class CliTest(unittest.TestCase):
             [
                 {
                     "intent": "locate-evidence",
+                    "stale": False,
                     "terms": ["compiler"],
                     "text": "Where are compiler and client responsibilities?",
                 },
                 {
                     "intent": "locate-evidence",
+                    "stale": False,
                     "terms": ["client"],
                     "text": "Where is the client rendered?",
                 },
@@ -514,8 +548,8 @@ class CliTest(unittest.TestCase):
         result, output, error = self.invoke("views", "--root", str(self.repository.root))
         self.assertEqual(0, result, error)
         self.assertIn(
-            "Where are compiler and client responsibilities?\n"
-            "Where is the client rendered?",
+            "[fresh] Where are compiler and client responsibilities?\n"
+            "[fresh] Where is the client rendered?",
             output,
         )
         self.assertIn("Skipped 1 file(s) that are not saved views.", output)
@@ -523,6 +557,13 @@ class CliTest(unittest.TestCase):
             output.index("Where are compiler and client responsibilities?"),
             output.index("Where is the client rendered?"),
         )
+
+        self.repository.write("docs/design.md", "# Changed\n")
+        result, output, error = self.invoke(
+            "views", "--root", str(self.repository.root), "--json"
+        )
+        self.assertEqual(0, result, error)
+        self.assertTrue(all(item["stale"] for item in json.loads(output)["questions"]))
 
     def test_views_keeps_question_across_transformations(self) -> None:
         snapshot = self.representation_fixture()
@@ -560,6 +601,7 @@ class CliTest(unittest.TestCase):
             [
                 {
                     "intent": "locate-evidence",
+                    "stale": False,
                     "terms": ["compiler", "client"],
                     "text": "Where are compiler and client responsibilities?",
                 }

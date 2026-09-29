@@ -12,9 +12,11 @@ from tower.arguments import parser
 from tower.evidence import (
     EvidenceError,
     build_snapshot,
-    load_live_snapshot,
+    frame_is_stale,
+    load_snapshot,
     resolve_evidence,
     search_snapshot,
+    snapshot_is_stale,
     write_snapshot,
 )
 from tower.evaluation import (
@@ -112,7 +114,7 @@ def render_evidence(record: dict[str, object]) -> str:
 
 VIEW_QUESTION_FILTER = (
     'select(.schema == "tower-representation-ir" and .schema_version == 1)'
-    " | .frame.question"
+    " | .frame | {question, workspace, worktree}"
 )
 
 
@@ -130,7 +132,11 @@ def extract_view_question(path: Path) -> dict[str, object] | None:
         raise TowerError("required command not found: jq") from error
 
     if result.returncode == 0:
-        return json.loads(result.stdout)
+        frame = json.loads(result.stdout)
+        question = frame.get("question")
+        if not isinstance(question, dict):
+            return None
+        return {**question, "stale": frame_is_stale(frame)}
     if result.returncode in (1, 4, 5):
         return None
     detail = result.stderr.strip() or f"exit status {result.returncode}"
@@ -217,7 +223,13 @@ def run_views(arguments: argparse.Namespace) -> None:
         )
         return
     if questions:
-        print("\n".join(str(item["text"]) for item in questions))
+        lines = []
+        for item in questions:
+            state = "stale" if item["stale"] else "fresh"
+            if item["stale"] is None:
+                state = "unknown"
+            lines.append(f"[{state}] {item['text']}")
+        print("\n".join(lines))
     else:
         print(f"No saved views found in {directory}")
     if skipped:
@@ -251,7 +263,8 @@ def run_transformation(arguments: argparse.Namespace) -> None:
 
 def run_map(arguments: argparse.Namespace) -> None:
     if arguments.view:
-        print(render_representation(load_representation(evidence_path(arguments.view))))
+        view = load_representation(evidence_path(arguments.view))
+        print(render_representation(view, stale=frame_is_stale(view.get("frame"))))
         return
     run_compilation(arguments)
 
@@ -273,7 +286,11 @@ def run_compilation(arguments: argparse.Namespace) -> None:
             "map requires --view or a complete compilation request; missing "
             + ", ".join("--" + name.replace("_", "-") for name in missing)
         )
-    records = load_live_snapshot(evidence_path(arguments.evidence))
+    records = load_snapshot(evidence_path(arguments.evidence))
+    if snapshot_is_stale(records):
+        raise TowerError(
+            "evidence snapshot is stale; run 'tower index' and answer the question again"
+        )
     view = compile_representation(
         records,
         question=arguments.question,
@@ -294,7 +311,7 @@ def run_compilation(arguments: argparse.Namespace) -> None:
 
 def run_evidence_command(arguments: argparse.Namespace) -> None:
     snapshot = evidence_path(arguments.evidence)
-    records = load_live_snapshot(snapshot)
+    records = load_snapshot(snapshot)
     if arguments.command == "search":
         results = search_snapshot(records, arguments.query)
         if arguments.format == "json":
