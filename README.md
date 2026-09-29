@@ -47,6 +47,10 @@ Tower is a proof of
 concept; artifact formats may change. See [the description](docs/DESCRIPTION.md)
 for the model and [the milestones](docs/MILESTONE.md) for current scope.
 
+Reproduce the pinned baseline and Tower-assisted evaluation with the tasks,
+rubrics, session format, and commands in
+[`experiments/tower/`](experiments/tower/README.md).
+
 ## Agent use
 
 Agents should start with [`AGENTS.md`](AGENTS.md). Prefer JSON output, retain the

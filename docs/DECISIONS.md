@@ -95,7 +95,7 @@ visible-unit budget. Existing units, typed connections, subject, and boundary
 ports remain unchanged. Collapse restores the original boundary view exactly,
 apart from the appended history that records the inverse rewrite. Trace and
 project record every filtered unit and connection as an omitted claim. Continue
-to repeatable dogfooding evaluation; the local rewrite contract is useful without
+to a dogfooding evaluation; the local rewrite contract is useful without
 introducing syntax-aware evidence or another representation store.
 
 Repeat the experiment with:
@@ -121,3 +121,28 @@ python -m tower project contains \
 python -m tower collapse <region-id> \
   --view .tower/refined-view.json --output .tower/collapsed-view.json
 ```
+
+## Repeatable dogfooding evaluation — continue to an agent observer
+
+Three public tasks pin revision `44cd9895d9ed83b40a828b0401b072c013907d95`
+and keep their ground-truth claims, required conditions, source spans,
+distractors, and rubrics outside indexed evidence. The `session-start`,
+`session-record`, `session-submit`, `score`, and `compare` commands produce
+atomic, inspectable JSON and reject revision mismatches or incomplete
+assessments.
+
+The first compiler-input pilot scored both ordinary-tools and Tower-assisted
+answers at 12/12 with no incorrect claims or omitted conditions. The Tower run
+varied question, focus, viewpoint, detail, and budget one at a time and recorded
+the resulting frame, subject, relationship, source-detail, and omission changes.
+It used ten more recorded actions and 25.984589 fewer seconds. Because the same
+implementation agent authored the task and rehearsed the Tower commands, those
+measurements cannot support a causal accuracy or speed advantage. This
+procedural run establishes reproducibility only. Continue to the bounded Amp
+observer experiment: the compiler frame, explicit omissions, and resolvable
+evidence were useful enough to test as agent context, and independent,
+uninterrupted repetitions there must decide whether they improve outcomes.
+
+Repeat the experiment with the instructions and artifacts under
+`experiments/tower/`. Do not expose `ground-truth/` until the participant has
+submitted an answer.

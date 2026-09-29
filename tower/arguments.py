@@ -123,4 +123,33 @@ def parser() -> argparse.ArgumentParser:
     collapse.add_argument("region_id", help="refined region ID")
     collapse.add_argument("--view", required=True, help="Representation IR path")
     collapse.add_argument("--output", required=True, help="transformed Representation IR path")
+
+    session_start = subparsers.add_parser("session-start")
+    session_start.add_argument("--task", required=True, help="public evaluation task JSON")
+    session_start.add_argument("--condition", choices=("baseline", "tower"), required=True)
+    session_start.add_argument("--root", default=".", help="pinned Git workspace")
+    session_start.add_argument("--output", required=True, help="evaluation session JSON")
+
+    session_record = subparsers.add_parser("session-record")
+    session_record.add_argument(
+        "action", choices=("query", "navigation", "transformation", "evidence-opened")
+    )
+    session_record.add_argument("value", help="command, stable ID, span, or navigation target")
+    session_record.add_argument("--session", required=True, help="evaluation session JSON")
+
+    session_submit = subparsers.add_parser("session-submit")
+    session_submit.add_argument("--session", required=True, help="evaluation session JSON")
+    session_submit.add_argument("--answer", required=True, help="plain-text answer path")
+    session_submit.add_argument("--confidence", type=int, help="confidence from 0 to 100")
+
+    score = subparsers.add_parser("score")
+    score.add_argument("--session", required=True, help="submitted evaluation session JSON")
+    score.add_argument("--rubric", required=True, help="private ground-truth rubric JSON")
+    score.add_argument("--assessment", required=True, help="explicit assessor judgment JSON")
+    score.add_argument("--output", required=True, help="evaluation score JSON")
+
+    compare = subparsers.add_parser("compare")
+    compare.add_argument("--baseline", required=True, help="baseline score JSON")
+    compare.add_argument("--tower", required=True, help="Tower-assisted score JSON")
+    compare.add_argument("--output", required=True, help="comparison JSON")
     return cli

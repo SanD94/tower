@@ -32,34 +32,11 @@ The resulting **View** is Representation IR, not a screen layout. It contains th
 
 Early milestones may implement a deliberately narrow value for an input, but no input may remain decorative metadata. A milestone that cannot demonstrate how its supported inputs affect output has not implemented this contract.
 
-## Backend PoCs
-
-### Milestone 5: repeatable dogfooding evaluation
-
-**Question:** Does Tower help a person understand an unfamiliar Tower change more accurately or with less navigation than ordinary tools?
-
-**PoC:** run one pinned Tower investigation once with ordinary tools and once with the Tower CLI, then compare the two inspectable session records and scored answers.
-
-Implementation:
-
-- Pin Tower revisions that contain completed backend slices.
-- Define several answerable tasks over those revisions without encoding their answers in compiler rules.
-- Store ground-truth claims, required conditions, source spans, distractors, and answer rubrics separately from indexed evidence.
-- Compare ordinary `rg`, editor, and Git investigation with deterministic Tower.
-- Record queries, transformations, evidence opened, elapsed time, and submitted answers.
-- Evaluate correctness and omitted conditions, not diagram attractiveness.
-
-Exit criteria:
-
-- Another person can reproduce both baseline and Tower-assisted sessions.
-- At least one task exercises question, focus, viewpoint, detail, and budget independently.
-- A written decision says whether the compiler contract is useful enough to justify client work.
-
 ## Client PoCs
 
 ### Milestone 6: Amp observer and navigator
 
-**Entry condition:** Milestone 5 justifies an agent client.
+**Entry condition:** The pinned dogfooding evaluation justifies testing a bounded agent client.
 
 **Question:** Can an agent request a bounded view and incrementally inspect evidence instead of ingesting the repository indiscriminately?
 

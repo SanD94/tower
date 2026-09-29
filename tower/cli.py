@@ -17,6 +17,16 @@ from tower.evidence import (
     search_snapshot,
     write_snapshot,
 )
+from tower.evaluation import (
+    EvaluationError,
+    compare_scores,
+    read_json,
+    record_action,
+    score_session,
+    start_session,
+    submit_answer,
+    write_json,
+)
 from tower.representation import (
     RepresentationError,
     collapse_representation,
@@ -311,6 +321,58 @@ def run_evidence_command(arguments: argparse.Namespace) -> None:
         print(render_evidence(record))
 
 
+def run_session_start(arguments: argparse.Namespace) -> None:
+    task = read_json(evidence_path(arguments.task), "evaluation task")
+    workspace = inspect_workspace(arguments.root)
+    session = start_session(
+        task, arguments.condition, workspace.revision, dirty=workspace.dirty
+    )
+    output = evidence_path(arguments.output)
+    write_json(session, output)
+    print(str(output))
+
+
+def run_session_record(arguments: argparse.Namespace) -> None:
+    path = evidence_path(arguments.session)
+    session = read_json(path, "evaluation session")
+    write_json(record_action(session, arguments.action, arguments.value), path)
+    print(str(path))
+
+
+def run_session_submit(arguments: argparse.Namespace) -> None:
+    path = evidence_path(arguments.session)
+    session = read_json(path, "evaluation session")
+    try:
+        answer = evidence_path(arguments.answer).read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as error:
+        raise TowerError(f"cannot read answer {arguments.answer}: {error}") from error
+    write_json(
+        submit_answer(session, answer, confidence=arguments.confidence), path
+    )
+    print(str(path))
+
+
+def run_score(arguments: argparse.Namespace) -> None:
+    score = score_session(
+        read_json(evidence_path(arguments.session), "evaluation session"),
+        read_json(evidence_path(arguments.rubric), "evaluation rubric"),
+        read_json(evidence_path(arguments.assessment), "evaluation assessment"),
+    )
+    output = evidence_path(arguments.output)
+    write_json(score, output)
+    print(str(output))
+
+
+def run_compare(arguments: argparse.Namespace) -> None:
+    comparison = compare_scores(
+        read_json(evidence_path(arguments.baseline), "baseline score"),
+        read_json(evidence_path(arguments.tower), "Tower score"),
+    )
+    output = evidence_path(arguments.output)
+    write_json(comparison, output)
+    print(str(output))
+
+
 COMMANDS: dict[str, Callable[[argparse.Namespace], None]] = {
     "status": run_workspace_command,
     "files": run_workspace_command,
@@ -325,6 +387,11 @@ COMMANDS: dict[str, Callable[[argparse.Namespace], None]] = {
     "trace": run_transformation,
     "project": run_transformation,
     "collapse": run_transformation,
+    "session-start": run_session_start,
+    "session-record": run_session_record,
+    "session-submit": run_session_submit,
+    "score": run_score,
+    "compare": run_compare,
 }
 
 
@@ -333,6 +400,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         COMMANDS[arguments.command](arguments)
         return 0
-    except (EvidenceError, RepresentationError, TowerError, WorkspaceError, OSError) as error:
+    except (
+        EvidenceError,
+        EvaluationError,
+        RepresentationError,
+        TowerError,
+        WorkspaceError,
+        OSError,
+    ) as error:
         print(f"tower: {error}", file=sys.stderr)
         return 1

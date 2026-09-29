@@ -211,7 +211,6 @@ Don't design a database schema during the PoC. Move to SQLite or another store o
 
 Interfaces arrive only after the backend behavior they consume is executable:
 
-- **Milestone 5:** CLI, terminal output, JSON/JSON Lines, and optional `fzf` selection/preview.
 - **Milestone 6:** an Amp skill tests bounded agent consumption of the same CLI contract.
 - **Milestone 7:** a SwiftUI client tests persistent inspection of saved Representation IR.
 - **Milestone 8:** only after a specific spatial question is identified, a Metal viewport tests strategic-map interaction.
@@ -459,14 +458,6 @@ All clients and transformations must preserve:
 - Surface conflicts when source changes invalidate a correction.
 - Treat corrections as evaluation data, not automatically as universal rules.
 
-### R13. Evaluation instrumentation
-
-- Record task start/end, queries, transformations, evidence opened, and answers submitted.
-- Support baseline sessions using ordinary `rg`, `fzf`, an editor, and Git without generated representations.
-- Support Tower-assisted sessions for the same pinned revision and task.
-- Keep self-reported usefulness separate from correctness and navigation measurements.
-- Export anonymizable session data as JSON.
-
 ## 10. Non-functional requirements
 
 ### Performance
@@ -546,69 +537,7 @@ The skill evolves in three versions:
 
 The skill must not tell Amp that Tower is helpful. It should explain the commands, decision rules, and limitations, then let evaluation determine usefulness.
 
-## 12. Tower experimental corpus
-
-Tower is its own initial corpus. Evaluation pins Tower revisions after executable backend slices exist so questions and expected answers remain reproducible while development continues.
-
-### Task A: evidence lineage
-
-> Where is the representation compiler contract defined, and which exact evidence supports each part of it?
-
-This tests search evidence, normalized spans, provenance, and stale-evidence detection.
-
-### Task B: bounded evidence trail
-
-> Which Tower files and revisions define how search evidence is collected and inspected?
-
-This tests whether question, focus, evidence/change viewpoints, detail, and a visible-unit budget produce a useful explanation from text matches and Git history without claiming unsupported program semantics.
-
-### Task C: local representation change
-
-> When one unit in an evidence view is refined or projected, what must remain stable and what new source or history evidence becomes visible?
-
-This tests local rewrites, ports, focus continuity, omissions, and transformation history.
-
-### Ground-truth package for each task
-
-Before generating a representation, manually record:
-
-- Correct explanatory claims.
-- Necessary branch conditions and invariants.
-- Supporting source and test spans.
-- Distracting but irrelevant nearby code.
-- Acceptable alternative explanations.
-- A scoring rubric for submitted answers.
-
-The compiler must not read the answer rubric. The rubric is evaluation data only.
-
-## 13. Evaluation design
-
-For each task, compare:
-
-1. Existing tools only: an editor, `rg`, `fzf`, and Git.
-2. Deterministic Tower.
-3. Deterministic Tower with Amp as a client.
-4. Tower with AI-proposed representations.
-5. Native and strategic-map visualization, only when their entry conditions are met.
-
-Within the strategic-map condition, compare the full 3D perspective mode with its orthographic top-down mode. The third dimension must improve orientation, relationship comprehension, or retention rather than merely increase visual novelty.
-
-Measure:
-
-- Answer correctness against the rubric.
-- Time to first correct explanation.
-- Files and source spans opened.
-- Search and navigation operations.
-- Incorrect claims and omitted branch conditions.
-- Ability to predict a related unfamiliar behavior.
-- Confidence calibration.
-- Delayed reconstruction of the mental model.
-- Human corrections required.
-- For Amp, context volume and tool calls where observable.
-
-Use the same pinned Tower revision and avoid exposing ground-truth answers to the compiler, skill, or participants. Tower-specific answers must never be embedded in generic collectors or compilation rules.
-
-## 14. Repository layout target
+## 12. Repository layout target
 
 Create directories only as their milestone begins. The intended shape is:
 
@@ -631,7 +560,7 @@ docs/
 
 Do not create empty packages or integration shells before the milestone that uses them. Split the Python package only when its actual responsibilities make the split useful.
 
-## 15. Decision on application form
+## 13. Decision on application form
 
 The initial deliverable is a disposable proof of concept:
 
