@@ -4,18 +4,18 @@
 
 The minimal Python CLI can identify a Git workspace and exact revision from either
 the repository root or a nested path, distinguish a dirty working copy, and list
-the searchable files selected by `rg`. Its versioned JSON output is sufficient to
+the searchable files selected by Git. Its versioned JSON output is sufficient to
 identify the evidence source for the next snapshot experiment. Continue to the
-inspectable-evidence slice without adding another VCS backend or file-discovery
-mechanism.
+inspectable-evidence slice without adding another VCS backend.
 
 ## Inspectable evidence — continue
 
 The `index`, `search`, and `evidence` commands answer where Tower's compiler
 contract is defined and expose the exact normalized source span and collector
 provenance behind each result. Re-indexing an unchanged workspace produces the
-same JSON Lines snapshot, while a source edit marks evidence from only that file
-as stale. The experiment supports continuing to the first representation
+same JSON Lines evidence. The original experiment marked edited evidence stale;
+the later live-workspace decision below replaces that behavior. The experiment
+supports continuing to the first representation
 compiler without adding a database or replacing `rg`.
 
 Repeat the experiment with:
@@ -25,6 +25,19 @@ python -m tower index --root . --output .tower/evidence.jsonl
 python -m tower search 'View = compile' --evidence .tower/evidence.jsonl
 python -m tower evidence <id> --evidence .tower/evidence.jsonl
 ```
+
+## Git-authoritative live workspace — continue
+
+Git now owns revision, file-set, ignore, and byte-content identity. Tower uses
+`git ls-files --cached --others --exclude-standard` for discovery and
+`git hash-object` blob OIDs for tracked, modified, and untracked files. The JSON
+Lines index is a refreshable cache: each live search, evidence lookup, or
+compilation follows the current `HEAD` and worktree instead of reconstructing and
+serving old source. Tower IDs remain contextual for file occurrences, spans,
+units, connections, and omissions, so equal blobs at different paths do not
+collapse. Saved Representation IR remains immutable and records its source
+revision and worktree identities. Continue without a database, daemon, or
+Tower-owned branch state.
 
 ## First end-to-end representation compiler — continue
 

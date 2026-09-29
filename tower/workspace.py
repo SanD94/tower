@@ -61,7 +61,16 @@ def searchable_files(workspace: Workspace) -> list[str]:
     root = Path(workspace.root)
     try:
         result = subprocess.run(
-            ["rg", "--files"],
+            [
+                "git",
+                "ls-files",
+                "--cached",
+                "--others",
+                "--exclude-standard",
+                "-z",
+                "--",
+                ".",
+            ],
             cwd=root,
             check=False,
             stdout=subprocess.PIPE,
@@ -69,9 +78,13 @@ def searchable_files(workspace: Workspace) -> list[str]:
             text=True,
         )
     except FileNotFoundError as error:
-        raise WorkspaceError("required command not found: rg") from error
+        raise WorkspaceError("required command not found: git") from error
 
-    if result.returncode not in (0, 1):
+    if result.returncode != 0:
         detail = result.stderr.strip() or f"exit status {result.returncode}"
-        raise WorkspaceError(f"rg failed: {detail}")
-    return sorted(path for path in result.stdout.splitlines() if path)
+        raise WorkspaceError(f"git failed: {detail}")
+    return sorted(
+        path
+        for path in result.stdout.split("\0")
+        if path and ((root / path).is_file() or (root / path).is_symlink())
+    )

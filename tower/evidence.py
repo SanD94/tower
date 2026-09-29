@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Iterable, Sequence
 
 
-SNAPSHOT_SCHEMA_VERSION = 1
+SNAPSHOT_SCHEMA_VERSION = 2
 
 
 class EvidenceError(Exception):
@@ -57,24 +57,43 @@ def run_git(
     return result.stdout if result.returncode == 0 else None
 
 
-def content_hash(content: bytes) -> str:
-    return hashlib.sha256(content).hexdigest()
-
-
 def evidence_id(kind: str, *parts: object) -> str:
     encoded = json.dumps(parts, ensure_ascii=False, separators=(",", ":")).encode()
     return f"{kind}-{hashlib.sha256(encoded).hexdigest()[:20]}"
 
 
 def discover_files(root: Path, excluded: Path) -> list[str]:
-    paths = run_rg(["--files", "--null"], cwd=root).split("\0")
+    output = run_git(
+        ["ls-files", "--cached", "--others", "--exclude-standard", "-z", "--", "."],
+        cwd=root,
+    ) or ""
+    paths = output.split("\0")
     discovered = []
     for path in paths:
         if not path:
             continue
-        if (root / path).resolve() != excluded:
+        source = root / path
+        if source.resolve() != excluded and (source.is_file() or source.is_symlink()):
             discovered.append(path)
     return sorted(discovered)
+
+
+def git_blob_oid(root: Path, content: bytes) -> str:
+    try:
+        result = subprocess.run(
+            ["git", "hash-object", "--stdin"],
+            cwd=root,
+            input=content,
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+    except FileNotFoundError as error:
+        raise EvidenceError("required command not found: git") from error
+    if result.returncode != 0:
+        detail = result.stderr.decode(errors="replace").strip()
+        raise EvidenceError(f"git failed: {detail or f'exit status {result.returncode}'}")
+    return result.stdout.decode("ascii").strip()
 
 
 def indexed_lines(content: bytes) -> Iterable[tuple[int, bytes, bytes]]:
@@ -183,7 +202,7 @@ def collect_git_evidence(
             if not parts:
                 continue
             oid = parts[0].lstrip("^")
-            if len(parts) < 4 or len(oid) != 40 or oid == "0" * 40:
+            if len(parts) < 4 or len(oid) != len(revision) or set(oid) == {"0"}:
                 continue
             try:
                 final_line = int(parts[2])
@@ -225,29 +244,13 @@ def build_snapshot(root: Path, revision: str, output: Path) -> list[dict[str, ob
     else:
         status_arguments.append(f":(exclude,top){output_path}")
     dirty = bool((run_git(status_arguments, cwd=root) or "").strip())
-    records: list[dict[str, object]] = [
-        {
-            "type": "snapshot",
-            "id": evidence_id("snapshot", str(root), revision),
-            "schema_version": SNAPSHOT_SCHEMA_VERSION,
-            "workspace": {
-                "root": str(root),
-                "revision": revision,
-                "dirty": dirty,
-                "vcs": "git",
-            },
-            "collector": {
-                "name": "tower-index",
-                "file_discovery": ["rg", "--files", "--null"],
-            },
-        }
-    ]
+    records: list[dict[str, object]] = []
     file_records: list[dict[str, object]] = []
     span_records: list[dict[str, object]] = []
     for path in discover_files(root, output):
         content = (root / path).read_bytes()
-        digest = content_hash(content)
-        file_id = evidence_id("file", path, digest)
+        blob_oid = git_blob_oid(root, content)
+        file_id = evidence_id("file", path, blob_oid)
         try:
             content.decode("utf-8")
         except UnicodeDecodeError:
@@ -258,10 +261,25 @@ def build_snapshot(root: Path, revision: str, output: Path) -> list[dict[str, ob
             "type": "file",
             "id": file_id,
             "path": path,
-            "content_hash": digest,
+            "blob_oid": blob_oid,
             "size_bytes": len(content),
             "encoding": encoding,
-            "collector": {"name": "rg", "command": ["rg", "--files", "--null"]},
+            "collector": {
+                "name": "git",
+                "commands": [
+                    [
+                        "git",
+                        "ls-files",
+                        "--cached",
+                        "--others",
+                        "--exclude-standard",
+                        "-z",
+                        "--",
+                        ".",
+                    ],
+                    ["git", "hash-object", "--stdin"],
+                ],
+            },
         }
         records.append(file_record)
         file_records.append(file_record)
@@ -284,6 +302,38 @@ def build_snapshot(root: Path, revision: str, output: Path) -> list[dict[str, ob
             }
             records.append(span_record)
             span_records.append(span_record)
+    worktree = [
+        {"path": record["path"], "blob_oid": record["blob_oid"]}
+        for record in file_records
+    ]
+    records.insert(
+        0,
+        {
+            "type": "snapshot",
+            "id": evidence_id("snapshot", str(root), revision, worktree),
+            "schema_version": SNAPSHOT_SCHEMA_VERSION,
+            "workspace": {
+                "root": str(root),
+                "revision": revision,
+                "dirty": dirty,
+                "vcs": "git",
+            },
+            "worktree": {"files": worktree},
+            "collector": {
+                "name": "tower-index",
+                "file_discovery": [
+                    "git",
+                    "ls-files",
+                    "--cached",
+                    "--others",
+                    "--exclude-standard",
+                    "-z",
+                    "--",
+                    ".",
+                ],
+            },
+        },
+    )
     records.extend(collect_git_evidence(root, revision, file_records, span_records))
     return records
 
@@ -309,7 +359,7 @@ def write_snapshot(records: Sequence[dict[str, object]], output: Path) -> None:
         raise
 
 
-def load_snapshot(path: Path) -> list[dict[str, object]]:
+def _read_snapshot(path: Path) -> list[dict[str, object]]:
     try:
         lines = path.read_text(encoding="utf-8").splitlines()
     except (OSError, UnicodeError) as error:
@@ -320,6 +370,11 @@ def load_snapshot(path: Path) -> list[dict[str, object]]:
         raise EvidenceError(f"invalid evidence snapshot {path}: {error}") from error
     if not records or records[0].get("type") != "snapshot":
         raise EvidenceError(f"invalid evidence snapshot {path}: missing snapshot record")
+    return records
+
+
+def load_snapshot(path: Path) -> list[dict[str, object]]:
+    records = _read_snapshot(path)
     if records[0].get("schema_version") != SNAPSHOT_SCHEMA_VERSION:
         raise EvidenceError(
             f"unsupported evidence schema: {records[0].get('schema_version')}"
@@ -334,38 +389,19 @@ def snapshot_root(records: Sequence[dict[str, object]]) -> Path:
     return Path(workspace["root"])
 
 
-def stale_file_ids(records: Sequence[dict[str, object]]) -> set[str]:
+def load_live_snapshot(path: Path) -> list[dict[str, object]]:
+    try:
+        records = load_snapshot(path)
+    except EvidenceError as error:
+        if "unsupported evidence schema" not in str(error):
+            raise
+        records = _read_snapshot(path)
     root = snapshot_root(records)
-    stale: set[str] = set()
-    for record in records:
-        if record.get("type") != "file":
-            continue
-        source = root / str(record["path"])
-        try:
-            current_hash = content_hash(source.read_bytes())
-        except OSError:
-            current_hash = None
-        if current_hash != record["content_hash"]:
-            stale.add(str(record["id"]))
-    return stale
-
-
-def reconstruct_snapshot(records: Sequence[dict[str, object]], destination: Path) -> None:
-    spans_by_file: dict[str, list[dict[str, object]]] = {}
-    for record in records:
-        if record.get("type") == "span":
-            spans_by_file.setdefault(str(record["file_id"]), []).append(record)
-    for record in records:
-        if record.get("type") != "file" or record.get("encoding") != "utf-8":
-            continue
-        target = destination / str(record["path"])
-        target.parent.mkdir(parents=True, exist_ok=True)
-        spans = spans_by_file.get(str(record["id"]), [])
-        content = "".join(
-            str(span["text"]) + str(span["line_ending"])
-            for span in sorted(spans, key=lambda item: item["span"]["start"]["line"])
-        )
-        target.write_text(content, encoding="utf-8", newline="")
+    revision = (run_git(["rev-parse", "--verify", "HEAD"], cwd=root) or "").strip()
+    current = build_snapshot(root, revision, path)
+    if current != records:
+        write_snapshot(current, path)
+    return current
 
 
 def search_snapshot(
@@ -376,46 +412,50 @@ def search_snapshot(
         for record in records
         if record.get("type") == "span"
     }
-    stale = stale_file_ids(records)
     results: list[dict[str, object]] = []
-    with tempfile.TemporaryDirectory(prefix="tower evidence search ") as directory:
-        search_root = Path(directory)
-        reconstruct_snapshot(records, search_root)
-        output = run_rg(["--json", "--", query, "."], cwd=search_root)
-        for line in output.splitlines():
-            event = json.loads(line)
-            if event.get("type") != "match":
-                continue
-            data = event["data"]
-            path = str(data["path"]["text"])
-            if path.startswith("./"):
-                path = path[2:]
-            line_number = int(data["line_number"])
-            span_record = spans[(path, line_number)]
-            for match in data["submatches"]:
-                results.append(
-                    {
-                        "id": span_record["id"],
-                        "path": path,
-                        "span": {
-                            "start": {
-                                "line": line_number,
-                                "byte_column": int(match["start"]),
-                            },
-                            "end": {
-                                "line": line_number,
-                                "byte_column": int(match["end"]),
-                            },
+    root = snapshot_root(records)
+    files = [
+        str(record["path"])
+        for record in records
+        if record.get("type") == "file" and record.get("encoding") == "utf-8"
+    ]
+    if not files:
+        return results
+    output = run_rg(["--json", "--", query, *files], cwd=root)
+    for line in output.splitlines():
+        event = json.loads(line)
+        if event.get("type") != "match":
+            continue
+        data = event["data"]
+        path = str(data["path"]["text"])
+        if path.startswith("./"):
+            path = path[2:]
+        line_number = int(data["line_number"])
+        span_record = spans[(path, line_number)]
+        for match in data["submatches"]:
+            results.append(
+                {
+                    "id": span_record["id"],
+                    "path": path,
+                    "span": {
+                        "start": {
+                            "line": line_number,
+                            "byte_column": int(match["start"]),
                         },
-                        "text": span_record["text"],
-                        "stale": span_record["file_id"] in stale,
-                        "collector": {
-                            "name": "rg",
-                            "command": ["rg", "--json", "--", query, "."],
-                            "query": query,
+                        "end": {
+                            "line": line_number,
+                            "byte_column": int(match["end"]),
                         },
-                    }
-                )
+                    },
+                    "text": span_record["text"],
+                    "stale": False,
+                    "collector": {
+                        "name": "rg",
+                        "command": ["rg", "--json", "--", query, *files],
+                        "query": query,
+                    },
+                }
+            )
     return results
 
 
@@ -426,7 +466,5 @@ def resolve_evidence(
     if record is None:
         raise EvidenceError(f"evidence not found: {identifier}")
     result = dict(record)
-    stale = stale_file_ids(records)
-    file_id = identifier if record.get("type") == "file" else record.get("file_id")
-    result["stale"] = file_id in stale
+    result["stale"] = False
     return result

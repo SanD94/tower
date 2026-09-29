@@ -171,8 +171,8 @@ Self-hosting does not by itself establish that Tower generalizes to large, heter
                      +-----------+------------+
                                  |
                      +-----------v------------+
-                     | typed evidence snapshots|
-                     | JSONL + source spans     |
+                     | typed evidence cache    |
+                     | JSONL + source spans    |
                      +-----------+------------+
                                  |
                          +-------+-------+
@@ -193,14 +193,15 @@ Python is a PoC choice, not the visual-client implementation language. If the te
 
 ### 7.2 Evidence storage: inspectable files first
 
-Store Tower's entities, relationships, claims, provenance, and representations as versioned JSON or JSON Lines artifacts. Source text remains in the working tree; artifacts contain paths, revisions, source spans, hashes, and collector metadata.
+Store Tower's entities, relationships, claims, provenance, and representations as versioned JSON or JSON Lines artifacts. Source text remains in the Git worktree. The JSON Lines index is a refreshable derived cache, while saved Representation IR is an immutable historical artifact containing the revision and worktree blob identities used to compile it.
 
 Don't design a database schema during the PoC. Move to SQLite or another store only when artifact size, query behavior, or incremental updates create a measured problem. The JSON format is disposable and may evolve while the representation model is being learned.
 
 ### 7.3 Evidence collection
 
-- Use `rg --files` for file discovery and `rg --json` for exact or regular-expression matches and context.
-- Use read-only Git commands for revision identity, status, log, diff, changed files, and line provenance.
+- Use `git ls-files --cached --others --exclude-standard` as the authority for tracked and untracked, non-ignored worktree files.
+- Use `git hash-object` for file-content identity and `rg --json` to search the resulting current-worktree file set.
+- Use read-only Git commands for revision identity, status, log, diff, changed files, and line provenance. Re-inspect `HEAD` for every live operation rather than persisting branch state.
 - Use optional `fzf` only to select and preview evidence for user themselves, by which it produces semantic facts.
 - Recognize simple textual forms, such as Markdown headings, with explicit `rg` patterns rather than a parser.
 - Preserve collector name, command parameters, and version on every derived fact.
@@ -243,7 +244,7 @@ Required fields:
 - Revision or working-copy identity.
 - Source span where applicable.
 - Display name.
-- Content hash where applicable.
+- Git blob OID where applicable; contextual Tower entities retain Tower-owned IDs.
 - Collector provenance.
 
 PoC entity types:
@@ -343,14 +344,15 @@ All clients and transformations must preserve:
 
 ### R1. Workspace and revision identity
 
-- Identify the current Git revision and working-copy state without mutating it.
-- Pin experimental snapshots so results remain reproducible.
+- Identify the current Git revision and working-copy state without mutating it on every live operation.
+- Record the revision and worktree blob identities in saved views so experiments remain reproducible.
 - Keep uncommitted changes distinguishable from indexed base content.
 
 ### R2. File and search evidence
 
-- Enumerate searchable files through `rg --files` while honoring repository ignores.
+- Enumerate tracked and untracked, non-ignored files through Git.
 - Execute exact and regular-expression searches through `rg --json`.
+- Search current worktree files rather than source reconstructed from cached evidence.
 - Convert matches into normalized source spans.
 - Stream search results to terminal, `fzf`, editor, and Amp clients.
 
@@ -359,7 +361,7 @@ All clients and transformations must preserve:
 - Collect exact and regular-expression matches, context lines, and simple forms such as headings through explicit `rg` queries.
 - Preserve the query that produced each match and never upgrade a match to a symbol reference, call, dependency, or cause.
 - Use file paths and explicit naming patterns to find candidate tests, while labeling the result as textual evidence rather than a tests relationship.
-- Update only files whose content hashes changed.
+- Refresh cached evidence when `HEAD`, the file set, or Git blob identities change.
 
 ### R4. Git evidence
 
@@ -373,7 +375,7 @@ All clients and transformations must preserve:
 - Given any entity, relationship, or claim, print its complete provenance.
 - Emit source locations that editors and clients can open at the exact span.
 - Preview evidence in `fzf` without requiring an editor integration.
-- Report stale evidence when file hashes no longer match.
+- Refresh live evidence instead of serving stale spans; historical identity remains in saved Representation IR.
 
 ### R6. Representation compilation
 
@@ -479,7 +481,7 @@ Product-level performance targets should be set from observed PoC usage.
 
 - PoC commands write artifacts atomically so an interrupted run does not replace the last complete result.
 - Artifact and Representation IR versions are explicit, but compatibility migrations are not required while the PoC format remains experimental.
-- A stale working copy must produce a warning rather than silently displaying invalid spans.
+- A live command must refresh mismatched cached evidence rather than display invalid spans.
 
 ### Portability
 

@@ -12,7 +12,7 @@ from tower.arguments import parser
 from tower.evidence import (
     EvidenceError,
     build_snapshot,
-    load_snapshot,
+    load_live_snapshot,
     resolve_evidence,
     search_snapshot,
     write_snapshot,
@@ -91,7 +91,7 @@ def render_search_result(result: dict[str, object]) -> str:
 def render_evidence(record: dict[str, object]) -> str:
     state = "stale" if record["stale"] else "fresh"
     if record["type"] == "file":
-        return f"{record['id']}\t{record['path']}\t{state}\t{record['content_hash']}"
+        return f"{record['id']}\t{record['path']}\t{state}\t{record['blob_oid']}"
     if record["type"] == "commit":
         return f"{record['id']}\t{str(record['oid'])[:12]}\t{state}\t{record['subject']}"
     if record["type"] == "revision":
@@ -273,7 +273,7 @@ def run_compilation(arguments: argparse.Namespace) -> None:
             "map requires --view or a complete compilation request; missing "
             + ", ".join("--" + name.replace("_", "-") for name in missing)
         )
-    records = load_snapshot(evidence_path(arguments.evidence))
+    records = load_live_snapshot(evidence_path(arguments.evidence))
     view = compile_representation(
         records,
         question=arguments.question,
@@ -294,7 +294,7 @@ def run_compilation(arguments: argparse.Namespace) -> None:
 
 def run_evidence_command(arguments: argparse.Namespace) -> None:
     snapshot = evidence_path(arguments.evidence)
-    records = load_snapshot(snapshot)
+    records = load_live_snapshot(snapshot)
     if arguments.command == "search":
         results = search_snapshot(records, arguments.query)
         if arguments.format == "json":

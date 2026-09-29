@@ -20,6 +20,11 @@ tower index --root . --output .tower/evidence.jsonl
 tower search 'View = compile' --evidence .tower/evidence.jsonl
 ```
 
+The JSON Lines file is a derived cache, not a source snapshot. Live `search`,
+`evidence`, `compile`, and compiling `map` commands refresh it from the current
+Git `HEAD` and worktree. Saved Representation IR files remain immutable and
+record the revision and Git blob identities from which they were compiled.
+
 Build and read a representation:
 
 ```sh

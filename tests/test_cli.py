@@ -195,7 +195,7 @@ class CliTest(unittest.TestCase):
         self.assertEqual("βeta View = compile(Evidence)", evidence["text"])
         self.assertFalse(evidence["stale"])
 
-    def test_edit_marks_only_that_files_snapshot_evidence_stale(self) -> None:
+    def test_cache_refreshes_after_a_worktree_edit(self) -> None:
         self.repository.write("changed.txt", "snapshot needle\n")
         self.repository.write("unchanged.txt", "stable needle\n")
         self.repository.commit()
@@ -206,28 +206,86 @@ class CliTest(unittest.TestCase):
         _, output, _ = self.invoke(
             "search", "needle", "--evidence", str(snapshot), "--json"
         )
-        identifiers = {
+        old_identifiers = {
             result["path"]: result["id"] for result in json.loads(output)["results"]
         }
 
-        self.repository.write("changed.txt", "replacement\n")
-
-        states = {}
-        for path, identifier in identifiers.items():
-            result, output, error = self.invoke(
-                "evidence", identifier, "--evidence", str(snapshot), "--json"
-            )
-            self.assertEqual(0, result, error)
-            states[path] = json.loads(output)["stale"]
-        self.assertEqual({"changed.txt": True, "unchanged.txt": False}, states)
+        self.repository.write("changed.txt", "current needle\n")
 
         result, output, error = self.invoke(
-            "search", "snapshot needle", "--evidence", str(snapshot), "--json"
+            "search", "needle", "--evidence", str(snapshot), "--json"
         )
         self.assertEqual(0, result, error)
-        stale_match = json.loads(output)["results"][0]
-        self.assertEqual("snapshot needle", stale_match["text"])
-        self.assertTrue(stale_match["stale"])
+        matches = {
+            result["path"]: result for result in json.loads(output)["results"]
+        }
+        self.assertEqual("current needle", matches["changed.txt"]["text"])
+        self.assertFalse(matches["changed.txt"]["stale"])
+        self.assertNotEqual(old_identifiers["changed.txt"], matches["changed.txt"]["id"])
+        self.assertEqual(old_identifiers["unchanged.txt"], matches["unchanged.txt"]["id"])
+        self.assertNotIn("snapshot needle", output)
+
+        records = [json.loads(line) for line in snapshot.read_text().splitlines()]
+        changed_file = next(
+            record
+            for record in records
+            if record.get("type") == "file" and record.get("path") == "changed.txt"
+        )
+        self.assertEqual(
+            self.repository.git("hash-object", "changed.txt"), changed_file["blob_oid"]
+        )
+
+    def test_index_uses_git_blob_identity_for_tracked_modified_and_untracked_files(self) -> None:
+        self.repository.write("tracked.txt", "base\n")
+        self.repository.write("same-a.txt", "identical\n")
+        self.repository.commit()
+        self.repository.write("tracked.txt", "modified\n")
+        self.repository.write("same-b.txt", "identical\n")
+        self.repository.write("ignored.txt", "ignored\n")
+        self.repository.write(".gitignore", "ignored.txt\n")
+        snapshot = self.repository.root / "evidence.jsonl"
+
+        result, _, error = self.invoke(
+            "index", "--root", str(self.repository.root), "--output", str(snapshot)
+        )
+
+        self.assertEqual(0, result, error)
+        files = {
+            record["path"]: record
+            for record in map(json.loads, snapshot.read_text().splitlines())
+            if record.get("type") == "file"
+        }
+        self.assertNotIn("ignored.txt", files)
+        for path in ("tracked.txt", "same-a.txt", "same-b.txt"):
+            self.assertEqual(
+                self.repository.git("hash-object", path), files[path]["blob_oid"]
+            )
+            self.assertNotIn("content_hash", files[path])
+        self.assertEqual(files["same-a.txt"]["blob_oid"], files["same-b.txt"]["blob_oid"])
+        self.assertNotEqual(files["same-a.txt"]["id"], files["same-b.txt"]["id"])
+
+    def test_checkout_and_detached_head_refresh_the_cache(self) -> None:
+        self.repository.write("branch.txt", "main branch term\n")
+        main_revision = self.repository.commit("main content")
+        self.repository.git("checkout", "--quiet", "-b", "other")
+        self.repository.write("branch.txt", "other branch term\n")
+        other_revision = self.repository.commit("other content")
+        snapshot = self.repository.root / "evidence.jsonl"
+        self.invoke(
+            "index", "--root", str(self.repository.root), "--output", str(snapshot)
+        )
+
+        self.repository.git("checkout", "--quiet", "--detach", main_revision)
+        result, output, error = self.invoke(
+            "search", "branch term", "--evidence", str(snapshot), "--json"
+        )
+
+        self.assertEqual(0, result, error)
+        self.assertIn("main branch term", output)
+        self.assertNotIn("other branch term", output)
+        header = json.loads(snapshot.read_text().splitlines()[0])
+        self.assertEqual(main_revision, header["workspace"]["revision"])
+        self.assertNotEqual(other_revision, header["workspace"]["revision"])
 
     def representation_fixture(self) -> Path:
         self.repository.write(
@@ -290,6 +348,14 @@ class CliTest(unittest.TestCase):
         view = json.loads(view_path.read_text())
         self.assertEqual("tower-representation-ir", view["schema"])
         self.assertEqual(1, view["schema_version"])
+        self.assertEqual(
+            self.repository.git("rev-parse", "HEAD"),
+            view["frame"]["workspace"]["revision"],
+        )
+        self.assertTrue(view["frame"]["worktree"]["files"])
+        self.assertTrue(
+            all("blob_oid" in item for item in view["frame"]["worktree"]["files"])
+        )
         self.assertEqual(6, len(view["units"]))
         self.assertTrue(view["omissions"])
         self.assertEqual(
@@ -638,8 +704,13 @@ class CliTest(unittest.TestCase):
         snapshot = self.historical_fixture()
 
         views = {}
+        outputs = {}
         for viewpoint in ("evidence", "change"):
-            output = self.repository.root / f"{viewpoint}.json"
+            output = Path(self.repository.temporary_directory.name).parent / (
+                f"tower-{self.repository.root.name}-{viewpoint}.json"
+            )
+            self.addCleanup(output.unlink, missing_ok=True)
+            outputs[viewpoint] = output
             result, _, error = self.invoke(
                 "compile",
                 *self.historical_arguments(snapshot, viewpoint),
@@ -677,7 +748,7 @@ class CliTest(unittest.TestCase):
             )
         )
         result, output, error = self.invoke(
-            "map", "--view", str(self.repository.root / "change.json")
+            "map", "--view", str(outputs["change"])
         )
         self.assertEqual(0, result, error)
         self.assertIn("changed-with", output)

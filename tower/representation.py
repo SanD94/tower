@@ -186,6 +186,8 @@ def compile_representation(
     focus_id = evidence_reference(focus_record)
     frame = {
         "evidence": evidence_reference(records[0]),
+        "workspace": deepcopy(records[0].get("workspace", {})),
+        "worktree": deepcopy(records[0].get("worktree", {})),
         "question": {"text": question, "intent": intent, "terms": list(terms)},
         "focus": focus_id,
         "viewpoint": viewpoint,

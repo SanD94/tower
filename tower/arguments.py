@@ -24,7 +24,7 @@ def add_format_arguments(command: argparse.ArgumentParser, *, default: str) -> N
 def add_compiler_arguments(
     command: argparse.ArgumentParser, *, required: bool
 ) -> None:
-    command.add_argument("--evidence", required=required, help="JSON Lines snapshot path")
+    command.add_argument("--evidence", required=required, help="JSON Lines evidence cache path")
     command.add_argument("--question", required=required, help="information need")
     command.add_argument("--intent", required=required, help="explicit question intent")
     command.add_argument(
@@ -67,7 +67,7 @@ def parser() -> argparse.ArgumentParser:
 
     index = subparsers.add_parser("index")
     index.add_argument("--root", default=".", help="path inside a Git workspace")
-    index.add_argument("--output", required=True, help="JSON Lines snapshot path")
+    index.add_argument("--output", required=True, help="JSON Lines evidence cache path")
     add_format_arguments(index, default="compact")
 
     views = subparsers.add_parser(
@@ -79,12 +79,12 @@ def parser() -> argparse.ArgumentParser:
 
     search = subparsers.add_parser("search")
     search.add_argument("query", help="regular expression passed to rg")
-    search.add_argument("--evidence", required=True, help="JSON Lines snapshot path")
+    search.add_argument("--evidence", required=True, help="JSON Lines evidence cache path")
     add_format_arguments(search, default="compact")
 
     evidence = subparsers.add_parser("evidence")
     evidence.add_argument("id", help="file or source-span evidence ID")
-    evidence.add_argument("--evidence", required=True, help="JSON Lines snapshot path")
+    evidence.add_argument("--evidence", required=True, help="JSON Lines evidence cache path")
     add_format_arguments(evidence, default="compact")
 
     compile_command = subparsers.add_parser("compile")
